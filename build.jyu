@@ -1,0 +1,27 @@
+
+#import "Compiler";
+#import "Basic";
+#import "LibC";
+
+
+func @metaprogram main() {
+    var as_metaprogram = false;
+
+    mkdir("run_tree");
+
+    var options: Build_Options;
+    options.executable_name = "run_tree/a2600";
+
+    var compiler = create_compiler_instance(*options);
+
+    if compiler_load_file(compiler, "src/main.jyu") != true return;
+    if compiler_typecheck_program(compiler) != true return;
+    if compiler_generate_llvm_module(compiler) != true return;
+
+    if as_metaprogram {
+        if compiler_run_metaprogram(compiler, 0, null) != true return;
+    } else {
+        if compiler_emit_object_file(compiler) != true return;
+        if compiler_run_default_link_command(compiler) != true return;
+    }
+}
