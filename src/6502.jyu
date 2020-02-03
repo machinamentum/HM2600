@@ -1,7 +1,48 @@
 
 #import "Basic"; // assert
 
+typealias Memory_Map_Read_Handler  = (entry: *Memory_Map_Entry, addr: uint16) -> uint8;
+typealias Memory_Map_Write_Handler = (entry: *Memory_Map_Entry, addr: uint16, value: uint8) -> void;
+
+struct Memory_Map_Entry {
+    var cbdata: *void;
+    var start: uint16;
+    var end  : uint16; // points to the last byte handled by the handlers
+
+    var read : Memory_Map_Read_Handler;
+    var write: Memory_Map_Write_Handler;
+}
+
+struct Memory_Map {
+    var mappings: [..] Memory_Map_Entry;
+
+    func read(this: *Memory_Map, addr: uint16) -> (success: bool, value: uint8) {
+        for * this.mappings {
+            if addr >= it.start && addr <= it.end {
+                if it.read return (true, it.read(addr));
+            }
+        }
+
+        return (false, cast(uint8) -1);
+    }
+
+    func write(this: *Memory_Map, addr: uint16, value: uint8) -> bool {
+        for * this.mappings {
+            if it.start >= addr && addr <= it.end {
+                if it.write {
+                    it.write(addr, value);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+}
+
 struct M6507 {
+
+    let ADDRESS_BITS = 0b0001111111111111; // We only have 13 address lines on this chip
 
     // Bit format of opcode is generally aaabbbcc,
     // aaa = operation
@@ -13,7 +54,13 @@ struct M6507 {
     // they are correct; this helps reduce code bloat from repeating
     // similar operations across multiple opcodes in the switch in step().
 
-    let CC_BITS = 0x03;
+    let BBB_BITS   = (0b111 << 2);
+    let MODE_ZP    = (0b001 << 2);
+    let MODE_ZP_X  = (0b101 << 2); // In cc=10 instructions, becomes zeropage,Y
+    let MODE_ABS   = (0b011 << 2);
+    let MODE_ABS_X = (0b111 << 2); // In cc=10 instructions, becomes absolute,Y
+
+    let CC_BITS = 0b00000011;
 
     // Order is chosen to coincide the fact that  he lowest two bits
     // of the instruction format somewhat indicate the destination regiters.
@@ -30,6 +77,8 @@ struct M6507 {
     
     var P : uint8; // Status register
 
+    var memory: Memory_Map;
+
     let STATUS_CARRY   : uint8 = (1 << 0); // 0 = no carry, 1 = carry
     let STATUS_ZERO    : uint8 = (1 << 1); // 0 = non zero, 1 = zero
     let STATUS_IRQ     : uint8 = (1 << 2); // 0 = IRQ enable, 1 = IRQ disable
@@ -42,32 +91,30 @@ struct M6507 {
         this.P = (this.P & ~mask) | (values & mask);
     }
 
-    var ram: [128] uint8;
+    let NO_OFFSET: uint8   = 0;
+    let X_OFFSET : uint8   = 1;
+    let Y_OFFSET : uint8   = 2;
 
-    let NO_OFFSET = 0;
-    let X_OFFSET    = 1;
-    let Y_OFFSET    = 2;
-
-    func zero_page(this: *M6507, offset: uint8, register: uint8) -> *uint8 {
+    func zero_page(this: *M6507, offset: uint8, register: uint8) -> uint8 {
         return absolute(this, offset, register);
     }
 
-    func absolute(this: *M6507, offset: uint16, register: uint8) -> *uint8 {
+    func absolute(this: *M6507, offset: uint16, register: uint8) -> uint8 {
         var reg: uint8;
         if      register == X_OFFSET reg = this.regs[REG_X];
         else if register == Y_OFFSET reg = this.regs[REG_Y];
-        return get_byte_ptr(this, offset + reg);
+        return get_byte(this, offset + reg);
     }
 
-    func indirect(this: *M6507, offset: uint8, register: uint8) -> *uint8 {
+    func indirect(this: *M6507, offset: uint8, register: uint8) -> uint8 {
         if register == X_OFFSET {
-            var lo: uint16 = <<zero_page(this, offset,   X_OFFSET);
-            var hi: uint16 = <<zero_page(this, offset+1, X_OFFSET);
+            var lo: uint16 = zero_page(this, offset,   X_OFFSET);
+            var hi: uint16 = zero_page(this, offset+1, X_OFFSET);
 
             return absolute(this, lo | (hi << 8), NO_OFFSET);
         } else if register == Y_OFFSET {
-            var lo: uint16 = <<zero_page(this, offset,   NO_OFFSET);
-            var hi: uint16 = <<zero_page(this, offset+1, NO_OFFSET);
+            var lo: uint16 = zero_page(this, offset,   NO_OFFSET);
+            var hi: uint16 = zero_page(this, offset+1, NO_OFFSET);
 
             var addr = lo | (hi << 8);
 
@@ -123,14 +170,64 @@ struct M6507 {
             case 0xA9, 0xA2, 0xA0:
                 var reg = op & CC_BITS;
                 clks_ticked += do_load_imm(this, reg);
+
+            case 0xA4, 0xA5, 0xA6, 0xB4, 0xB5, 0xB6:
+                var reg = op & CC_BITS;
+                var nn = get_byte(this, this.PC);
+                this.PC += 1;
+
+                clks_ticked += 3;
+
+                var offset_reg = NO_OFFSET;
+
+                var mode = op & BBB_BITS;
+                if mode == MODE_ZP_X {
+                    var offset_reg = X_OFFSET;
+                    if reg == REG_X offset_reg = Y_OFFSET;
+
+                    clks_ticked += 1;
+                }
+
+                this.regs[reg] = zero_page(this, nn, offset_reg);
+            case 0xAC, 0xAD, 0xAE, 0xBC, 0xBD, 0xBE:
+                var reg = op & CC_BITS;
+                var nnnn = this.get_word(this.PC);
+                this.PC += 2;
+
+                clks_ticked += 4;
+
+                var offset_reg = NO_OFFSET;
+
+                var mode = op & BBB_BITS;
+                if mode == MODE_ABS_X {
+                    offset_reg = X_OFFSET;
+                    if reg == REG_X offset_reg = Y_OFFSET;
+
+                    // @Incomplete add a cycle if cross page boundary
+                }
+
+                this.regs[reg] = absolute(this, nnnn, offset_reg);
         }
     }
 
-    func get_byte(this: *M6507, addr: uint16) -> uint8 {
-        return <<get_byte_ptr(this, addr);
+    func get_byte(this: *M6507, _addr: uint16) -> uint8 {
+        var addr = _addr;
+        addr &= ADDRESS_BITS;
+
+        var success: bool;
+        var value: uint8;
+
+        (success, value) = this.memory.read(addr);
+        assert(success, "get_byte failed");
+        return value;
     }
 
-    func get_byte_ptr(this: *M6507, addr: uint16) -> *uint8 {
-        
+    func get_word(this: *M6507, addr: uint16) -> uint16 {
+        var lo: uint16 = get_byte(this, addr);
+        var hi: uint16 = get_byte(this, addr+1);
+
+        return lo | (hi << 8);
     }
+
+    
 }

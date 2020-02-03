@@ -1,8 +1,42 @@
 #import "LibC";
 #import "GLFW";
 #import "OpenGL";
+#import "Array";
 
 #load "6502.jyu";
+
+func cartridge_read(entry: *Memory_Map_Entry, _addr: uint16) -> uint8 {
+    var addr = _addr;
+    var rom = <<cast(*string) entry.cbdata;
+    addr &= M6507.ADDRESS_BITS;
+    addr -= 0x1000; // map address from 0x1000-0x1FFF to 0x0000-0x0FFF
+
+    if rom.length < 4096 {
+        addr -= 2048; // mirror 2k ROM twice across the 4k address range.
+    }
+
+    return rom[addr];
+}
+
+func cartridge_write(entry: *Memory_Map_Entry, _addr: uint16, value: uint8) -> void {
+    var addr = _addr;
+    var rom = <<cast(*string) entry.cbdata;
+    addr &= M6507.ADDRESS_BITS;
+    addr -= 0x1000; // map address from 0x1000-0x1FFF to 0x0000-0x0FFF
+
+    rom[addr] = value;
+}
+
+func concat(a: string, b: string) -> string {
+    var len = a.length + b.length;
+    var o: string;
+    o.data = cast() malloc(cast(size_t) len);
+    o.length = len;
+    memcpy(o.data, a.data, cast(size_t) a.length);
+    memcpy(o.data + a.length, b.data, cast(size_t) b.length);
+    return o;
+}
+
 
 func main() {
     if glfwInit() != 1 return;
@@ -22,6 +56,21 @@ func main() {
 
     init_gl_functions(get_proc);
 
+    var cpu: M6507;
+
+    var rom_image = read_entire_file("game.bin");
+
+    var cart: Memory_Map_Entry;
+    cart.cbdata = *rom_image;
+    cart.start = 0x1000;
+    cart.end   = 0x1FFF;
+    cart.read  = cartridge_read;
+    cart.write = cartridge_write;
+
+    cpu.memory.mappings.add(cart);
+
+    var entry_point = cpu.get_word(0xFFFC);
+    printf("Entry: 0x%X\n", entry_point);
 
     while !glfwWindowShouldClose(window) {
         glClear(GL_COLOR_BUFFER_BIT);
