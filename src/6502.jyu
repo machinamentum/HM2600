@@ -1,8 +1,8 @@
 
 #import "Basic"; // assert
 
-typealias Memory_Map_Read_Handler  = (entry: *Memory_Map_Entry, addr: uint16) -> uint8;
-typealias Memory_Map_Write_Handler = (entry: *Memory_Map_Entry, addr: uint16, value: uint8) -> void;
+typealias Memory_Map_Read_Handler  = (entry: *Memory_Map_Entry, addr: uint16) -> (handled: bool, value: uint8);
+typealias Memory_Map_Write_Handler = (entry: *Memory_Map_Entry, addr: uint16, value: uint8) -> bool;
 
 struct Memory_Map_Entry {
     var cbdata: *void;
@@ -19,7 +19,10 @@ struct Memory_Map {
     func read(this: *Memory_Map, addr: uint16) -> (success: bool, value: uint8) {
         for * this.mappings {
             if addr >= it.start && addr <= it.end {
-                if it.read return (true, it.read(addr));
+                if it.read {
+                    var result = it.read(addr);
+                    if result.handled return (true, result.value);
+                }
             }
         }
 
@@ -31,8 +34,8 @@ struct Memory_Map {
         for * this.mappings {
             if addr >= it.start && addr <= it.end {
                 if it.write {
-                    it.write(addr, value);
-                    return true;
+                    var handled = it.write(addr, value);
+                    if handled return true;
                 }
             }
         }
@@ -100,7 +103,12 @@ struct M6507 {
     let Y_OFFSET : uint8   = 2;
 
     func zero_page(this: *M6507, offset: uint8, register: uint8 = NO_OFFSET) -> uint16 {
-        return absolute(this, offset, register);
+        var reg: uint8;
+        
+        if (register == X_OFFSET) reg = this.regs[REG_X];
+        else if (register == Y_OFFSET) reg = this.regs[REG_Y];
+
+        return absolute(this, offset + reg, NO_OFFSET);
     }
 
     func absolute(this: *M6507, offset: uint16, register: uint8 = NO_OFFSET) -> uint16 {
@@ -175,18 +183,18 @@ struct M6507 {
     }
 
     func step(this: *M6507) -> int {
-        // printf("PC: %04X\n", this.PC);
+        printf("PC: %04X\n", this.PC);
 
         var op = this.get_byte(this.PC);
         this.PC += 1;
 
-        // printf("REG A: %02X\n", this.regs[REG_A]);
-        // printf("REG X: %02X\n", this.regs[REG_X]);
-        // printf("REG Y: %02X\n", this.regs[REG_Y]);
-        // printf("REG S: %02X\n", this.regs[REG_S]);
-        // printf("REG P: %02X\n", this.P);
+        printf("REG A: %02X\n", this.regs[REG_A]);
+        printf("REG X: %02X\n", this.regs[REG_X]);
+        printf("REG Y: %02X\n", this.regs[REG_Y]);
+        printf("REG S: %02X\n", this.regs[REG_S]);
+        printf("REG P: %02X\n", this.P);
 
-        // printf("Opcode: %02X\n", op);
+        printf("Opcode: %02X\n", op);
 
         var clks_ticked = 0;
 
@@ -259,6 +267,8 @@ struct M6507 {
                 var reg = op & CC_BITS;
                 var nn = get_byte(this, this.PC);
                 this.PC += 1;
+
+                if (op == 0x95) printf("nn: %02X\n", nn);
 
                 clks_ticked += 3;
 
