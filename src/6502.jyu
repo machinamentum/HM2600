@@ -43,6 +43,7 @@ struct Memory_Map {
 struct M6507 {
 
     let ADDRESS_BITS = 0b0001111111111111; // We only have 13 address lines on this chip
+    let STACK_ADDRESS: uint16 = 0x100; // Stack starts in page 1 of memory
 
     // Bit format of opcode is generally aaabbbcc,
     // aaa = operation
@@ -95,26 +96,26 @@ struct M6507 {
     let X_OFFSET : uint8   = 1;
     let Y_OFFSET : uint8   = 2;
 
-    func zero_page(this: *M6507, offset: uint8, register: uint8) -> uint8 {
+    func zero_page(this: *M6507, offset: uint8, register: uint8 = NO_OFFSET) -> uint16 {
         return absolute(this, offset, register);
     }
 
-    func absolute(this: *M6507, offset: uint16, register: uint8) -> uint8 {
+    func absolute(this: *M6507, offset: uint16, register: uint8 = NO_OFFSET) -> uint16 {
         var reg: uint8;
         if      register == X_OFFSET reg = this.regs[REG_X];
         else if register == Y_OFFSET reg = this.regs[REG_Y];
-        return get_byte(this, offset + reg);
+        return offset + reg;
     }
 
-    func indirect(this: *M6507, offset: uint8, register: uint8) -> uint8 {
+    func indirect(this: *M6507, offset: uint8, register: uint8) -> uint16 {
         if register == X_OFFSET {
             var lo: uint16 = zero_page(this, offset,   X_OFFSET);
             var hi: uint16 = zero_page(this, offset+1, X_OFFSET);
 
-            return absolute(this, lo | (hi << 8), NO_OFFSET);
+            return absolute(this, lo | (hi << 8));
         } else if register == Y_OFFSET {
-            var lo: uint16 = zero_page(this, offset,   NO_OFFSET);
-            var hi: uint16 = zero_page(this, offset+1, NO_OFFSET);
+            var lo: uint16 = zero_page(this, offset);
+            var hi: uint16 = zero_page(this, offset+1);
 
             var addr = lo | (hi << 8);
 
@@ -148,6 +149,7 @@ struct M6507 {
     }
 
     func step(this: *M6507) {
+        printf("PC: %04X\n", this.PC);
         var op = this.get_byte(this.PC);
         this.PC += 1;
 
@@ -188,7 +190,7 @@ struct M6507 {
                     clks_ticked += 1;
                 }
 
-                this.regs[reg] = zero_page(this, nn, offset_reg);
+                this.regs[reg] = this.get_byte(zero_page(this, nn, offset_reg));
             case 0xAC, 0xAD, 0xAE, 0xBC, 0xBD, 0xBE:
                 var reg = op & CC_BITS;
                 var nnnn = this.get_word(this.PC);
@@ -206,7 +208,64 @@ struct M6507 {
                     // @Incomplete add a cycle if cross page boundary
                 }
 
-                this.regs[reg] = absolute(this, nnnn, offset_reg);
+                this.regs[reg] = this.get_byte(absolute(this, nnnn, offset_reg));
+
+            case 0x18:
+                this.set_flags(STATUS_CARRY, 0);
+                clks_ticked += 2;
+            case 0x58:
+                this.set_flags(STATUS_IRQ, 0);
+                clks_ticked += 2;
+            case 0xD8:
+                this.set_flags(STATUS_DEC, 0);
+                clks_ticked += 2;
+            case 0xB8:
+                this.set_flags(STATUS_OVERFLOW, 0);
+                clks_ticked += 2;
+            case 0x38:
+                this.set_flags(STATUS_CARRY, STATUS_CARRY);
+                clks_ticked += 2;
+            case 0x78:
+                this.set_flags(STATUS_IRQ, STATUS_IRQ);
+                clks_ticked += 2;
+            case 0xF8:
+                this.set_flags(STATUS_DEC, STATUS_DEC);
+                clks_ticked += 2;
+            case 0xEA: // NOP
+                clks_ticked += 2;
+
+            case 0x4C:
+                var nnnn = this.get_word(this.PC);
+                this.PC = nnnn;
+                clks_ticked += 3;
+            case 0x6C:
+                var nnnn = this.get_word(this.PC);
+                this.PC = this.get_word(absolute(this, nnnn));
+                clks_ticked += 5;
+            case 0x20:
+                var nnnn = this.get_word(this.PC);
+                this.set_word(STACK_ADDRESS + this.regs[REG_S], this.PC+2);
+                // Do we need to inc/dec the stack pointer here?
+
+                this.PC = nnnn;
+                clks_ticked += 6;
+            case 0xE8, 0xC8: // INC X, INC Y
+                var reg = REG_X;
+                if op == 0xC8 reg = REG_Y;
+
+                this.regs[reg] += 1;
+
+                var flags = this.regs[reg] & STATUS_SIGN;
+                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+
+                this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+
+                clks_ticked += 2;
+
+        }
+
+        if clks_ticked == 0 {
+            printf("Unhandled opcode %02X\n", op);
         }
     }
 
@@ -220,6 +279,23 @@ struct M6507 {
         (success, value) = this.memory.read(addr);
         assert(success, "get_byte failed");
         return value;
+    }
+
+    func set_byte(this: *M6507, _addr: uint16, value: uint8) {
+        var addr = _addr;
+        addr &= ADDRESS_BITS;
+
+        var success: bool;
+
+        success = this.memory.write(addr, value);
+        assert(success, "set_byte failed");
+    }
+
+    func set_word(this: *M6507, _addr: uint16, value: uint16) {
+        var lo: uint8 = cast(uint8) (value & 0xFF);
+        var hi: uint8 = cast(uint8) ((value >> 8) & 0xFF);
+        set_byte(this, _addr, lo);
+        set_byte(this, _addr+1, hi);
     }
 
     func get_word(this: *M6507, addr: uint16) -> uint16 {
