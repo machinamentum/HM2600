@@ -48,6 +48,8 @@ func key_callback(window: *GLFWwindow, key: int32, scancode: int32, action: int3
 func main() {
     if glfwInit() != 1 return;
 
+    glfwWindowHint(GLFW_SCALE_TO_MONITOR, 1);
+
     var window = glfwCreateWindow(640, 480, "a2600", null, null);
     if !window {
         glfwTerminate();
@@ -82,7 +84,15 @@ func main() {
     cpu.PC = entry_point;
 
     var scanlines = 262; // NTSC, PAL is 312
-    var framebuffer = cast(*uint8) malloc(cast() (scanlines * 228/*color clocks per scanline*/ * sizeof(uint32)));
+    var pixels_per_scanline = 228;
+    var framebuffer = cast(*uint32) malloc(cast() (scanlines * pixels_per_scanline * sizeof(uint32)));
+
+    var fb_tex: GLuint;
+    glGenTextures(1, *fb_tex);
+    glBindTexture(GL_TEXTURE_2D, fb_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cast() pixels_per_scanline, cast() scanlines, 0, GL_RGBA, GL_UNSIGNED_BYTE, framebuffer);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
     while !glfwWindowShouldClose(window) {
         glClear(GL_COLOR_BUFFER_BIT);
@@ -93,6 +103,26 @@ func main() {
 
             cpu.step();
         }
+
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, fb_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cast() pixels_per_scanline, cast() scanlines, 0, GL_RGBA, GL_UNSIGNED_BYTE, framebuffer); // @Speed
+
+        glBegin(GL_TRIANGLES);
+            glTexCoord2f(0, 1);
+            glVertex3f(-1, -1, 0);
+            glTexCoord2f(1, 1);
+            glVertex3f(1, -1, 0);
+            glTexCoord2f(1, 0);
+            glVertex3f(1, 1, 0);
+
+            glTexCoord2f(1, 0);
+            glVertex3f(1, 1, 0);
+            glTexCoord2f(0, 0);
+            glVertex3f(-1, 1, 0);
+            glTexCoord2f(0, 1);
+            glVertex3f(-1, -1, 0);
+        glEnd();
 
 
         glfwPollEvents();

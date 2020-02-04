@@ -148,7 +148,7 @@ struct M6507 {
         return 2;
     }
 
-    func step(this: *M6507) {
+    func step(this: *M6507) -> int {
         printf("PC: %04X\n", this.PC);
         var op = this.get_byte(this.PC);
         this.PC += 1;
@@ -267,6 +267,8 @@ struct M6507 {
         if clks_ticked == 0 {
             printf("Unhandled opcode %02X\n", op);
         }
+
+        return clks_ticked;
     }
 
     func get_byte(this: *M6507, _addr: uint16) -> uint8 {
