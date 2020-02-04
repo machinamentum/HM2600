@@ -40,7 +40,7 @@ func concat(a: string, b: string) -> string {
 
 var step_cpu = false;
 func key_callback(window: *GLFWwindow, key: int32, scancode: int32, action: int32, mods: int32) -> void {
-    if key == GLFW_KEY_SPACE && action == 1 {
+    if key == GLFW_KEY_SPACE && (action == 1 || action == 2) {
         step_cpu = true;
     }
 }
@@ -94,15 +94,20 @@ func main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
+    step_cpu = true;
+    if step_cpu {
+        step_cpu = false;
+
+        while cpu.step() != 0 {
+
+        }
+    }
+
     while !glfwWindowShouldClose(window) {
         glClear(GL_COLOR_BUFFER_BIT);
         glClearColor(0, 0, 0, 1);
 
-        if step_cpu {
-            step_cpu = false;
 
-            cpu.step();
-        }
 
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, fb_tex);
