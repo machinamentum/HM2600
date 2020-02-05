@@ -335,6 +335,80 @@ struct M6507 {
 
                 this.set_byte(result.address, this.regs[reg]);
 
+            // XOR
+            case 0x49, 0x45, 0x55, 0x4D, 0x5D, 0x59, 0x41, 0x51:
+                var reg =op & CC_BITS;
+
+                var value: uint8;
+                // immediate mode == 010 if cc == 01
+                if (op & BBB_BITS) == (0b010 << 2) {
+                    value = this.get_byte(this.PC);
+                    this.PC += 1;
+                    clks_ticked += 2;
+                }  else {
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    value = this.get_byte(result.address);
+                    clks_ticked += result.clks_ticked;
+                }
+
+                this.regs[reg] ^= value;
+
+                var flags = this.regs[reg] & STATUS_SIGN;
+                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+
+                this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+
+            // ADC
+            case 0x69, 0x65, 0x75, 0x6D, 0x7D, 0x79, 0x61, 0x71:
+                var reg =op & CC_BITS;
+
+                var value: uint8;
+                // immediate mode == 010 if cc == 01
+                if (op & BBB_BITS) == (0b010 << 2) {
+                    value = this.get_byte(this.PC);
+                    this.PC += 1;
+                    clks_ticked += 2;
+                }  else {
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    value = this.get_byte(result.address);
+                    clks_ticked += result.clks_ticked;
+                }
+
+                var reg_value = this.regs[reg];
+                var result = (cast(uint16) reg_value) + value + (this.P & STATUS_CARRY);
+                this.regs[reg] = cast(uint8) result;
+
+                var flags = this.regs[reg] & STATUS_SIGN;
+                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+                if result & 0x100      flags |= STATUS_CARRY;
+
+                // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
+                if ((reg_value^result) & (value^result) & 0x80) flags |= STATUS_OVERFLOW;
+
+                this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
+
+            // TEST
+            case 0x24, 0x2C:
+                var value: uint8;
+                if op == 0x24 {
+                    var nn = this.get_byte(this.PC);
+                    this.PC += 1;
+                    clks_ticked += 3;
+
+                    value = this.get_byte(zero_page(this, nn));
+                } else {
+                    var nnnn = this.get_word(this.PC);
+                    this.PC += 2;
+                    clks_ticked += 4;
+
+                    value = this.get_byte(absolute(this, nnnn));
+                }
+
+                var flags = (value & (STATUS_SIGN | STATUS_OVERFLOW));
+                if ((this.regs[REG_A] & value) == 0) flags |= STATUS_ZERO;
+
+                this.set_flags(STATUS_SIGN | STATUS_OVERFLOW | STATUS_ZERO, flags);
+
             case 0x18:
                 this.set_flags(STATUS_CARRY, 0);
                 clks_ticked += 2;
