@@ -108,7 +108,7 @@ struct M6507 {
         if (register == X_OFFSET) reg = this.regs[REG_X];
         else if (register == Y_OFFSET) reg = this.regs[REG_Y];
 
-        return absolute(this, offset + reg, NO_OFFSET);
+        return absolute(this, offset + reg);
     }
 
     func absolute(this: *M6507, offset: uint16, register: uint8 = NO_OFFSET) -> uint16 {
@@ -120,13 +120,18 @@ struct M6507 {
 
     func indirect(this: *M6507, offset: uint8, register: uint8) -> uint16 {
         if register == X_OFFSET {
-            var lo: uint16 = zero_page(this, offset,   X_OFFSET);
-            var hi: uint16 = zero_page(this, offset+1, X_OFFSET);
+            // @Incomplete is the address calculated once such if nn+X == 0xFF
+            // then the hi byte would cross into 0x100? Or is it that nn+X
+            // is calculated twice such that address 0xFF and 0x00 are used?
+            // Currently we are doing the latter.
+            var lo: uint16 = this.get_byte(zero_page(this, offset, X_OFFSET));
+            var hi: uint16 = this.get_byte(zero_page(this, offset+1, X_OFFSET));
 
             return absolute(this, lo | (hi << 8));
         } else if register == Y_OFFSET {
-            var lo: uint16 = zero_page(this, offset);
-            var hi: uint16 = zero_page(this, offset+1);
+            // @Incomplete same issue as the above case
+            var lo: uint16 = this.get_byte(zero_page(this, offset));
+            var hi: uint16 = this.get_byte(zero_page(this, offset+1));
 
             var addr = lo | (hi << 8);
 
@@ -269,6 +274,8 @@ struct M6507 {
                 this.PC += 1;
 
                 if (op == 0x95) printf("nn: %02X\n", nn);
+
+                printf("Reg: %d\n", reg);
 
                 clks_ticked += 3;
 
@@ -418,7 +425,7 @@ struct M6507 {
         var success: bool;
 
         success = this.memory.write(addr, value);
-        assert(success, "set_byte failed");
+        // assert(success, "set_byte failed");
     }
 
     func set_word(this: *M6507, _addr: uint16, value: uint16) {

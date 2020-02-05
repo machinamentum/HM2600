@@ -221,6 +221,10 @@ func main() {
         glClearColor(0, 0, 0, 1);
 
 
+        if step_cpu {
+            step_cpu = false;
+            cpu.step();
+        }
 
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, fb_tex);
