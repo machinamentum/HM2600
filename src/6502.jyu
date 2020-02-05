@@ -387,6 +387,32 @@ struct M6507 {
 
                 this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
 
+            // Shift Right Logical
+            case 0x4A, 0x46, 0x56, 0x4E, 0x5E:
+                var reg =op & CC_BITS;
+
+                var value: uint8;
+                // immediate mode == 010 if cc == 01
+                if (op & BBB_BITS) == (0b010 << 2) {
+                    value = this.get_byte(this.PC);
+                    this.PC += 1;
+                    clks_ticked += 2;
+                }  else {
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    value = this.get_byte(result.address);
+                    clks_ticked += result.clks_ticked;
+                }
+
+                var reg_value = this.regs[reg];
+                var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
+
+                this.regs[reg] = this.regs[reg] >> 1;
+
+                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+
+                // Clear sign flag always
+                this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
             // TEST
             case 0x24, 0x2C:
                 var value: uint8;
