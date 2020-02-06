@@ -389,29 +389,109 @@ struct M6507 {
 
             // Shift Right Logical
             case 0x4A, 0x46, 0x56, 0x4E, 0x5E:
-                var reg =op & CC_BITS;
+                var reg = op & CC_BITS;
 
                 var value: uint8;
-                // immediate mode == 010 if cc == 01
-                if (op & BBB_BITS) == (0b010 << 2) {
-                    value = this.get_byte(this.PC);
+                if op == 0x4A {
+                    // LSR A
+                    var reg_value = this.regs[reg];
+                    var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
+
+                    this.regs[REG_A] = this.regs[REG_A] >> 1;
+
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    // Clear sign flag always
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
                     this.PC += 1;
                     clks_ticked += 2;
                 }  else {
+                    // is is_for_load correct here?
                     var result = this.do_addressing(reg, op & BBB_BITS, true);
                     value = this.get_byte(result.address);
-                    clks_ticked += result.clks_ticked;
+                    clks_ticked += result.clks_ticked + 2;
+
+                    var flags = value & STATUS_CARRY; // move bit 0 into carry flag
+
+                    value = value >> 1;
+
+                    if value == 0 flags |= STATUS_ZERO;
+
+                    // Clear sign flag always
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
+                    this.set_byte(result.address, value);
                 }
 
-                var reg_value = this.regs[reg];
-                var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
+            // Shift Left Logical
+            case 0x0A, 0x06, 0x16, 0x0E, 0x1E:
+                var reg = op & CC_BITS;
 
-                this.regs[reg] = this.regs[reg] >> 1;
+                var value: uint8;
+                if op == 0x4A {
+                    // LSR A
+                    var reg_value = this.regs[reg];
+                    var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
 
-                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+                    this.regs[REG_A] = this.regs[REG_A] << 1;
 
-                // Clear sign flag always
-                this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+                    flags |= this.regs[reg] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    // Clear sign flag always
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
+                    this.PC += 1;
+                    clks_ticked += 2;
+                }  else {
+                    // is is_for_load correct here?
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    value = this.get_byte(result.address);
+                    clks_ticked += result.clks_ticked + 2;
+
+                    var flags = value & STATUS_CARRY; // move bit 0 into carry flag
+
+                    value = value << 1;
+
+                    flags |= this.regs[reg] & STATUS_SIGN;
+                    if value == 0 flags |= STATUS_ZERO;
+
+                    // Clear sign flag always
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
+                    this.set_byte(result.address, value);
+                }
+
+            // AND
+            case 0x29, 0x25, 0x35, // Zero page ops
+                 0x2D, 0x3D, 0x39, // absolute ops
+                 0x21, 0x31:       // indirect ops
+
+                // immediate version
+                if (op == 0x29) {
+                    var nn = this.get_byte(this.PC);
+                    this.PC += 1;
+                    clks_ticked += 2;
+
+                    this.regs[REG_A] &= nn;
+
+                    var flags = this.regs[REG_A] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+                } else {
+                    var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, true);
+                    clks_ticked += result.clks_ticked;
+
+                    this.regs[REG_A] = this.regs[REG_A] & this.get_byte(result.address);
+
+                    var flags = this.regs[REG_A] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+                }
+                
 
             // TEST
             case 0x24, 0x2C:
@@ -493,6 +573,19 @@ struct M6507 {
 
                 clks_ticked += 2;
 
+            case 0x88, 0xCA: // DEC X, DEC Y
+                var reg = REG_X;
+                if op == 0xC8 reg = REG_Y;
+
+                this.regs[reg] -= 1;
+
+                var flags = this.regs[reg] & STATUS_SIGN;
+                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+
+                this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+
+                clks_ticked += 2;
+
             case 0x10:
                 clks_ticked += do_cond_branch(this, (this.P & STATUS_SIGN) == 0);
             case 0x30:
@@ -554,6 +647,4 @@ struct M6507 {
 
         return lo | (hi << 8);
     }
-
-    
 }
