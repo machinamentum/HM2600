@@ -573,6 +573,38 @@ struct M6507 {
 
                 clks_ticked += 2;
 
+            // INC memory
+            case 0xE6, 0xF6, 0xEE, 0xFE:
+                var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, false);
+                var value = this.get_byte(result.address);
+                clks_ticked += result.clks_ticked + 2;
+
+                value += 1;
+
+                var flags = value & STATUS_SIGN;
+                if value == 0 flags |= STATUS_ZERO;
+
+                // Clear sign flag always
+                this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+
+                this.set_byte(result.address, value);
+
+            // DEC memory
+            case 0xC6, 0xD6, 0xCE, 0xDE:
+                var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, false);
+                var value = this.get_byte(result.address);
+                clks_ticked += result.clks_ticked + 2;
+
+                value -= 1;
+
+                var flags = value & STATUS_SIGN;
+                if value == 0 flags |= STATUS_ZERO;
+
+                // Clear sign flag always
+                this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+
+                this.set_byte(result.address, value);
+
             case 0x88, 0xCA: // DEC X, DEC Y
                 var reg = REG_X;
                 if op == 0xC8 reg = REG_Y;

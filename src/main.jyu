@@ -5,6 +5,52 @@
 
 #load "6502.jyu";
 
+#clang_import """
+
+#include "stb_truetype.h"
+
+""";
+
+library "stb_truetype";
+
+var ttf_buffer : [1<<20] uint8;
+var temp_bitmap: [512*512] uint8;
+
+var cdata: [96] stbtt_bakedchar; // ASCII 32..126 is 95 glyphs
+var ftex: GLuint;
+
+func my_stbtt_initfont() {
+   fread(ttf_buffer.data, 1, 1<<20, fopen("data/Skytree_Mono.ttf", "rb"));
+   stbtt_BakeFontBitmap(ttf_buffer.data,0, 32.0, temp_bitmap.data,512,512, 32,96, cdata.data); // no guarantee this fits!
+   // can free ttf_buffer at this point
+   glGenTextures(1, *ftex);
+   glBindTexture(GL_TEXTURE_2D, ftex);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, 512,512, 0, GL_ALPHA, GL_UNSIGNED_BYTE, temp_bitmap.data);
+   // can free temp_bitmap at this point
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+}
+
+func my_stbtt_print(_x: float, _y: float, text: string) -> float {
+    var x = _x; var y = _y;
+    // assume orthographic projection with units = screen pixels, origin at top left
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, ftex);
+    glBegin(GL_QUADS);
+    for 0..<text.length {
+        var ch = text[it];
+        if (ch >= 32 && ch < 128) {
+            var q: stbtt_aligned_quad;
+            stbtt_GetBakedQuad(cdata.data, 512,512, cast(int32) (ch-32), *x,*y,*q,1);//1=opengl & d3d10+,0=d3d9
+            glTexCoord2f(q.s0,q.t0); glVertex2f(q.x0,q.y0);
+            glTexCoord2f(q.s1,q.t0); glVertex2f(q.x1,q.y0);
+            glTexCoord2f(q.s1,q.t1); glVertex2f(q.x1,q.y1);
+            glTexCoord2f(q.s0,q.t1); glVertex2f(q.x0,q.y1);
+        }
+    }
+    glEnd();
+    return x - _x;
+}
+
 let A12 = (1 << 12);
 let A9  = (1 << 9);
 let A7  = (1 << 7);
@@ -86,6 +132,27 @@ struct PIA {
 }
 
 struct TIA {
+    var framebuffer: [] uint32;
+
+    var color_table: [0x10] uint32;
+    var luminance_table: [0x8] uint32;
+
+    var write_regs: [0x2D] uint8;
+
+    func init(this: *TIA) {
+        // Taken from the full luminance values from here
+        // https://www.biglist.com/lists/stella/archives/200109/msg00285.html
+        this.color_table[0] = 0xECECEC;
+        this.color_table[1] = 0xFCFC68;
+        this.color_table[2] = 0xECC878;
+        this.color_table[3] = 0xFCBC94;
+        this.color_table[4] = 0xFCB4B4;
+        this.color_table[5] = 0xECB0E0;
+        this.color_table[6] = 0xD4B0FC;
+        
+        // @Incomplete
+    }
+
     func read(entry: *Memory_Map_Entry, _addr: uint16) -> (handled: bool, value: uint8) {
         if !(((_addr & A12) == 0) && ((_addr & A7) == 0)) return (false, -1);
 
@@ -116,8 +183,12 @@ struct TIA {
 
         if (addr > 0x2C) return false;
 
-        // @Incomplete
+        this.write_regs[addr] = value;
         return true;
+    }
+
+    func step(this: *TIA) {
+
     }
 }
 
@@ -139,11 +210,19 @@ func key_callback(window: *GLFWwindow, key: int32, scancode: int32, action: int3
 }
 
 func main() {
+    var rom_image = read_entire_file("game.bin");
+
+    if true {
+        var exe_path = get_executable_path();
+        printf("Exe path: '%.*s'\n", exe_path.length, exe_path.data);
+        set_working_directory(basename(exe_path));
+    }
+
     if glfwInit() != 1 return;
 
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, 1);
 
-    var window = glfwCreateWindow(640, 480, "a2600", null, null);
+    var window = glfwCreateWindow(1280, 720, "U0VDUkVUIFBST0pFQ1QgRE8gTk9UIExFQUs=", null, null);
     if !window {
         glfwTerminate();
         return;
@@ -161,8 +240,6 @@ func main() {
     init_gl_functions(get_proc);
 
     var cpu: M6507;
-
-    var rom_image = read_entire_file("game.bin");
 
     var cart: Memory_Map_Entry;
     cart.cbdata = *rom_image;
@@ -199,6 +276,8 @@ func main() {
     var scanlines = 262; // NTSC, PAL is 312
     var pixels_per_scanline = 228;
     var framebuffer = cast(*uint32) malloc(cast() (scanlines * pixels_per_scanline * sizeof(uint32)));
+    tia.framebuffer.data  = framebuffer;
+    tia.framebuffer.count = scanlines * pixels_per_scanline;
 
     var fb_tex: GLuint;
     glGenTextures(1, *fb_tex);
@@ -207,18 +286,20 @@ func main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-    step_cpu = true;
-    if step_cpu {
-        step_cpu = false;
+    // step_cpu = true;
+    // if step_cpu {
+    //     step_cpu = false;
 
-        while cpu.step() != 0 {
+    //     while cpu.step() != 0 {
 
-        }
-    }
+    //     }
+    // }
+
+    my_stbtt_initfont();
 
     while !glfwWindowShouldClose(window) {
         glClear(GL_COLOR_BUFFER_BIT);
-        glClearColor(0, 0, 0, 1);
+        glClearColor(0.2, 0.2, 0.2, 1);
 
 
         if step_cpu {
@@ -226,26 +307,87 @@ func main() {
             cpu.step();
         }
 
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        var width: int32;
+        var height: int32;
+        glfwGetWindowSize(window, *width, *height);
+        glViewport(0, 0, width, height);
+        glOrtho(0, width, height, 0, -1, 1);
+
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, fb_tex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cast() pixels_per_scanline, cast() scanlines, 0, GL_RGBA, GL_UNSIGNED_BYTE, framebuffer); // @Speed
 
-        glBegin(GL_TRIANGLES);
-            glTexCoord2f(0, 1);
-            glVertex3f(-1, -1, 0);
-            glTexCoord2f(1, 1);
-            glVertex3f(1, -1, 0);
-            glTexCoord2f(1, 0);
-            glVertex3f(1, 1, 0);
+        let scale = 3;
+        var playfield_width: float = pixels_per_scanline * scale;
+        var playfield_height: float = scanlines * scale;
+        {
+            
+            var x: float = 0;
+            var y: float = 0;
+            var width = playfield_width;
+            var height = playfield_height;
 
-            glTexCoord2f(1, 0);
-            glVertex3f(1, 1, 0);
-            glTexCoord2f(0, 0);
-            glVertex3f(-1, 1, 0);
-            glTexCoord2f(0, 1);
-            glVertex3f(-1, -1, 0);
-        glEnd();
+            glBegin(GL_TRIANGLES);
+                glTexCoord2f(0, 1);
+                glVertex3f(x, y, 0);
+                glTexCoord2f(1, 1);
+                glVertex3f(x+width, y, 0);
+                glTexCoord2f(1, 0);
+                glVertex3f(x+width, y+height, 0);
 
+                glTexCoord2f(1, 0);
+                glVertex3f(x+width, y+height, 0);
+                glTexCoord2f(0, 0);
+                glVertex3f(x, y+height, 0);
+                glTexCoord2f(0, 1);
+                glVertex3f(x, y, 0);
+            glEnd();
+        }
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable(GL_TEXTURE_2D);
+
+        var text_height: float = 32;
+        var y_offset: float;
+        var x_offset: float;
+        for pia.ram {
+            if (it_index % 32) == 0 && it_index != 0 {
+                x_offset = 0;
+                y_offset += 32;
+            }
+
+            var buf: [4] uint8;
+            snprintf(buf.data, cast() buf.count, "%02X ", it);
+            var width = my_stbtt_print(playfield_width + x_offset, y_offset + text_height, to_string(buf.data));
+            x_offset += width;
+        }
+
+        y_offset += text_height;
+
+        var buf: [32] uint8;
+        snprintf(buf.data, buf.count, "X: %02X", cpu.regs[M6507.REG_X]);
+        my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
+
+
+        snprintf(buf.data, buf.count, "Y: %02X", cpu.regs[M6507.REG_Y]);
+        my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
+
+        snprintf(buf.data, buf.count, "A: %02X", cpu.regs[M6507.REG_A]);
+        my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
+
+        snprintf(buf.data, buf.count, "S: %02X", cpu.regs[M6507.REG_S]);
+        my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
+
+        snprintf(buf.data, buf.count, "P: %02X", cpu.P);
+        my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
+
+        snprintf(buf.data, buf.count, "PC: %04X", cpu.PC);
+        my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
+
+        glDisable(GL_BLEND);
 
         glfwPollEvents();
         glfwSwapBuffers(window);
