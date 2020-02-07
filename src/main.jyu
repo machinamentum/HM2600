@@ -133,24 +133,63 @@ struct PIA {
 
 struct TIA {
     var framebuffer: [] uint32;
+    var current_pixel_clock: uint8;
+    var current_scanline: uint16;
 
     var color_table: [0x10] uint32;
-    var luminance_table: [0x8] uint32;
 
     var write_regs: [0x2D] uint8;
+
+    let COLUPF = 0x08;
+    let COLUBK = 0x09;
+    let PF0    = 0x0D;
+    let PF1    = 0x0E;
+    let PF2    = 0x0F;
 
     func init(this: *TIA) {
         // Taken from the full luminance values from here
         // https://www.biglist.com/lists/stella/archives/200109/msg00285.html
-        this.color_table[0] = 0xECECEC;
-        this.color_table[1] = 0xFCFC68;
-        this.color_table[2] = 0xECC878;
-        this.color_table[3] = 0xFCBC94;
-        this.color_table[4] = 0xFCB4B4;
-        this.color_table[5] = 0xECB0E0;
-        this.color_table[6] = 0xD4B0FC;
-        
-        // @Incomplete
+
+        // NTSC
+        // @Cleanup array initializers
+        this.color_table[0]  = 0xECECEC;
+        this.color_table[1]  = 0xFCFC68;
+        this.color_table[2]  = 0xECC878;
+        this.color_table[3]  = 0xFCBC94;
+        this.color_table[4]  = 0xFCB4B4;
+        this.color_table[5]  = 0xECB0E0;
+        this.color_table[6]  = 0xD4B0FC;
+        this.color_table[7]  = 0xBCB4FC;
+        this.color_table[8]  = 0xA4B8FC;
+        this.color_table[9]  = 0xA4C8FC;
+        this.color_table[10] = 0xA4E0FC;
+        this.color_table[11] = 0xA4FCD4;
+        this.color_table[12] = 0xB8FCB8;
+        this.color_table[13] = 0xC8FCA4;
+        this.color_table[14] = 0xE0EC9C;
+        this.color_table[15] = 0xFCE08C;
+    }
+
+    func calculate_color(this: *TIA, value: uint8) -> uint32 {
+        var lum = (value & 0xb1110) >> 1;
+        var lumf = ((cast(float) lum) / 7);
+
+        var src = this.color_table[(value & 0xF0) >> 4];
+
+        if lumf == 0 {
+            // @Hack to prevent colors from going complete black
+            lumf = 0.05;
+        } 
+
+        var a = cast(float) ((src & 0xFF0000) >> 16) / 255.0;
+        var b = cast(float) ((src & 0x00FF00) >> 8) / 255.0;
+        var c = cast(float) ((src & 0x0000FF) >> 0) / 255.0;
+
+        a *= lumf;
+        b *= lumf;
+        c *= lumf;
+
+        return (cast(uint32) a << 16) | (cast(uint32) b << 8) | cast(uint32) c;
     }
 
     func read(entry: *Memory_Map_Entry, _addr: uint16) -> (handled: bool, value: uint8) {
@@ -187,8 +226,34 @@ struct TIA {
         return true;
     }
 
-    func step(this: *TIA) {
+    let TOTAL_SCANLINES = 262;
+    let HBLANK_PIXELS = 68;
+    let PIXELS_PER_SCANLINE = 160;
 
+    func step(this: *TIA) {
+        // HBLANK period
+        if this.current_pixel_clock < HBLANK_PIXELS {
+            this.current_pixel_clock += 1;
+            return;
+        }
+
+        var current_pixel = this.current_pixel_clock - HBLANK_PIXELS;
+
+        var color: uint32 = this.color_table[0] | 0xFF000000;
+
+        this.framebuffer[current_pixel + this.current_scanline * PIXELS_PER_SCANLINE] = color;
+
+        this.current_pixel_clock += 1;
+        if current_pixel+1 >= PIXELS_PER_SCANLINE {
+            // @Incomplete signal WSYNC
+            this.current_pixel_clock = 0;
+
+            this.current_scanline += 1;
+
+            if this.current_scanline >= TOTAL_SCANLINES {
+                this.current_scanline = 0;
+            }
+        }
     }
 }
 
@@ -261,6 +326,7 @@ func main() {
     cpu.memory.mappings.add(pia_map);
 
     var tia: TIA;
+    tia.init();
     var tia_map: Memory_Map_Entry;
     tia_map.cbdata = *tia;
     tia_map.start = 0x0000;
@@ -273,8 +339,8 @@ func main() {
     var entry_point = cpu.get_word(0xFFFC);
     cpu.PC = entry_point;
 
-    var scanlines = 262; // NTSC, PAL is 312
-    var pixels_per_scanline = 228;
+    var scanlines = TIA.TOTAL_SCANLINES; // NTSC, PAL is 312
+    var pixels_per_scanline = TIA.PIXELS_PER_SCANLINE;
     var framebuffer = cast(*uint32) malloc(cast() (scanlines * pixels_per_scanline * sizeof(uint32)));
     tia.framebuffer.data  = framebuffer;
     tia.framebuffer.count = scanlines * pixels_per_scanline;
@@ -286,15 +352,6 @@ func main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-    // step_cpu = true;
-    // if step_cpu {
-    //     step_cpu = false;
-
-    //     while cpu.step() != 0 {
-
-    //     }
-    // }
-
     my_stbtt_initfont();
 
     while !glfwWindowShouldClose(window) {
@@ -304,7 +361,13 @@ func main() {
 
         if step_cpu {
             step_cpu = false;
-            cpu.step();
+            var clks = cpu.step();
+
+            for 0..<clks {
+                tia.step();
+                tia.step();
+                tia.step();
+            }
         }
 
         glMatrixMode(GL_PROJECTION);
@@ -312,8 +375,13 @@ func main() {
         var width: int32;
         var height: int32;
         glfwGetWindowSize(window, *width, *height);
-        glViewport(0, 0, width, height);
-        glOrtho(0, width, height, 0, -1, 1);
+
+        var xscale: float;
+        var yscale: float;
+        glfwGetWindowContentScale(window, *xscale, *yscale);
+
+        glViewport(0, 0, cast(GLsizei) (width * xscale), cast(GLsizei) (height * yscale));
+        glOrtho(0, width*xscale, height*yscale, 0, -1, 1);
 
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, fb_tex);
@@ -354,7 +422,7 @@ func main() {
         var y_offset: float;
         var x_offset: float;
         for pia.ram {
-            if (it_index % 32) == 0 && it_index != 0 {
+            if (it_index % 16) == 0 && it_index != 0 {
                 x_offset = 0;
                 y_offset += 32;
             }

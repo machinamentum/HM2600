@@ -88,13 +88,19 @@ func @metaprogram main() {
 
     var options: Build_Options;
     options.executable_name = "run_tree/a2600";
+    // options.verbose_diagnostics = true;
+    // options.emit_llvm_ir = true;
 
     var compiler = create_compiler_instance(*options);
     var cwd = get_working_directory();
     compiler_add_library_search_path(compiler, concat(cwd, "/run_tree"));
     compiler_add_library_search_path(compiler, concat(cwd, "/src"));
 
-    compile_c_lib("src/stb_truetype.c", "run_tree/stb_truetype");
+    #if os(Windows) {
+        compile_c_lib("src/stb_truetype.c", "run_tree/stb_truetype");
+    } else {
+        compile_c_lib("src/stb_truetype.c", "run_tree/libstb_truetype");
+    }
 
     if compiler_load_file(compiler, "src/main.jyu") != true return;
     if compiler_typecheck_program(compiler) != true return;
