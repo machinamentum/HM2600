@@ -76,11 +76,11 @@ struct M6507 {
     // of the instruction format somewhat indicate the destination regiters.
     // Note that cc = 11 refers to undocumented instructions. Those instructions
     // are not implemented in this program.
-    let REG_Y = 0; // cc = 00
-    let REG_A = 1; // cc = 01
-    let REG_X = 2; // cc = 10
+    let REG_Y: uint8 = 0; // cc = 00
+    let REG_A: uint8 = 1; // cc = 01
+    let REG_X: uint8 = 2; // cc = 10
 
-    let REG_S = 3;
+    let REG_S: uint8 = 3;
 
     var regs: [4] uint8;
     var PC: uint16;
@@ -325,6 +325,66 @@ struct M6507 {
 
                 this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
 
+            // CMP A
+            case 0xC9,             // #immediate
+                 0xC5, 0xD5,       // Zero page ops
+                 0xCD, 0xDD, 0xD9, // absolute ops
+                 0xC1, 0xD1:       // indirect ops
+                var reg = op & CC_BITS;
+
+                var value: uint8;
+                // #immediate
+                if op == 0xC9 {
+                    var nn = this.get_byte(this.PC);
+                    this.PC += 1;
+
+                    value = nn;
+                    clks_ticked += 2;
+                } else {
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    clks_ticked += result.clks_ticked;
+
+                    value = this.get_byte(result.address);
+                }
+
+                var final: uint16 = cast(uint16) this.regs[reg] + cast(uint16) (0xFF - value);
+                var flags = cast(uint8) (final & STATUS_SIGN);
+                if (final & 0xFF) == 0 flags |= STATUS_ZERO;
+                if (final & 0x100) flags |= STATUS_CARRY;
+
+                this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
+            // CMP X, CMP Y
+            case 0xE0, 0xE4, 0xEC, 0xC0, 0xC4, 0xCC:
+                var reg = REG_X;
+
+                if (op & 0xF0) == 0xC0 {
+                    reg = REG_Y;
+                }
+
+                var value: uint8;
+                // #immediate
+                if (op & 0x0F) == 0x00 {
+                    var nn = this.get_byte(this.PC);
+                    this.PC += 1;
+
+                    value = nn;
+                    clks_ticked += 2;
+                } else {
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    clks_ticked += result.clks_ticked;
+
+                    value = this.get_byte(result.address);
+                }
+
+                var final: uint16 = cast(uint16) this.regs[reg] + cast(uint16) (0xFF - value);
+                var flags = cast(uint8) (final & STATUS_SIGN);
+                if (final & 0xFF) == 0 flags |= STATUS_ZERO;
+                if (final & 0x100) flags |= STATUS_CARRY;
+
+                this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
+
             // Store register into memory
             case 0x84, 0x85, 0x86, 0x94, 0x95, 0x96, // zero page ops
                  0x8C, 0x8D, 0x8E, 0x9D, 0x99,       // absolute ops
@@ -376,6 +436,35 @@ struct M6507 {
 
                 var reg_value = this.regs[reg];
                 var result = (cast(uint16) reg_value) + value + (this.P & STATUS_CARRY);
+                this.regs[reg] = cast(uint8) result;
+
+                var flags = this.regs[reg] & STATUS_SIGN;
+                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+                if result & 0x100      flags |= STATUS_CARRY;
+
+                // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
+                if ((reg_value^result) & (value^result) & 0x80) flags |= STATUS_OVERFLOW;
+
+                this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
+
+            // SBC
+            case 0xE9, 0xE5, 0xF5, 0xED, 0xFD, 0xF9, 0xE1, 0xF1:
+                var reg =op & CC_BITS;
+
+                var value: uint8;
+                // immediate mode == 010 if cc == 01
+                if (op & BBB_BITS) == (0b010 << 2) {
+                    value = this.get_byte(this.PC);
+                    this.PC += 1;
+                    clks_ticked += 2;
+                }  else {
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    value = this.get_byte(result.address);
+                    clks_ticked += result.clks_ticked;
+                }
+
+                var reg_value = this.regs[reg];
+                var result = (cast(uint16) reg_value) + (0xFF - value) + (this.P & STATUS_CARRY) - 1;
                 this.regs[reg] = cast(uint8) result;
 
                 var flags = this.regs[reg] & STATUS_SIGN;

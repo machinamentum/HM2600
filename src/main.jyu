@@ -354,14 +354,22 @@ func main() {
 
     my_stbtt_initfont();
 
+    // glDisable(GL_CULL_FACE);
+
+    step_cpu = true;
+
     while !glfwWindowShouldClose(window) {
         glClear(GL_COLOR_BUFFER_BIT);
         glClearColor(0.2, 0.2, 0.2, 1);
 
 
         if step_cpu {
-            step_cpu = false;
+            // step_cpu = false;
             var clks = cpu.step();
+
+            if clks == 0 {
+                step_cpu = false;
+            }
 
             for 0..<clks {
                 tia.step();
@@ -376,9 +384,14 @@ func main() {
         var height: int32;
         glfwGetWindowSize(window, *width, *height);
 
-        var xscale: float;
-        var yscale: float;
-        glfwGetWindowContentScale(window, *xscale, *yscale);
+        var xscale: float = 1;
+        var yscale: float = 1;
+
+        // @TODO I am not sure what is the best thing to do on Windows/Linux
+        // Using this on Windows seems to mess up rendering in that nothing gets drawn..
+        #if os(MacOSX) {
+            glfwGetWindowContentScale(window, *xscale, *yscale);
+        }
 
         glViewport(0, 0, cast(GLsizei) (width * xscale), cast(GLsizei) (height * yscale));
         glOrtho(0, width*xscale, height*yscale, 0, -1, 1);
@@ -391,25 +404,24 @@ func main() {
         var playfield_width: float = pixels_per_scanline * scale;
         var playfield_height: float = scanlines * scale;
         {
-            
             var x: float = 0;
             var y: float = 0;
             var width = playfield_width;
             var height = playfield_height;
 
             glBegin(GL_TRIANGLES);
-                glTexCoord2f(0, 1);
+                glTexCoord2f(0, 0);
                 glVertex3f(x, y, 0);
-                glTexCoord2f(1, 1);
-                glVertex3f(x+width, y, 0);
                 glTexCoord2f(1, 0);
+                glVertex3f(x+width, y, 0);
+                glTexCoord2f(1, 1);
                 glVertex3f(x+width, y+height, 0);
 
-                glTexCoord2f(1, 0);
+                glTexCoord2f(1, 1);
                 glVertex3f(x+width, y+height, 0);
-                glTexCoord2f(0, 0);
-                glVertex3f(x, y+height, 0);
                 glTexCoord2f(0, 1);
+                glVertex3f(x, y+height, 0);
+                glTexCoord2f(0, 0);
                 glVertex3f(x, y, 0);
             glEnd();
         }
@@ -454,6 +466,15 @@ func main() {
 
         snprintf(buf.data, buf.count, "PC: %04X", cpu.PC);
         my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
+
+        y_offset += text_height*6;
+
+        snprintf(buf.data, buf.count, "PF0: %02X", tia.write_regs[TIA.PF0]);
+        my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
+        snprintf(buf.data, buf.count, "PF1: %02X", tia.write_regs[TIA.PF1]);
+        my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
+        snprintf(buf.data, buf.count, "PF2: %02X", tia.write_regs[TIA.PF2]);
+        my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
 
         glDisable(GL_BLEND);
 
