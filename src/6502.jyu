@@ -403,8 +403,6 @@ struct M6507 {
 
                     // Clear sign flag always
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
-
-                    this.PC += 1;
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
@@ -441,8 +439,6 @@ struct M6507 {
 
                     // Clear sign flag always
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
-
-                    this.PC += 1;
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
