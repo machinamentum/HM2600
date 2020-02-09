@@ -11,8 +11,6 @@
 
 """;
 
-library "stb_truetype";
-
 var ttf_buffer : [1<<20] uint8;
 var temp_bitmap: [512*512] uint8;
 
@@ -272,6 +270,10 @@ func key_callback(window: *GLFWwindow, key: int32, scancode: int32, action: int3
     if key == GLFW_KEY_SPACE && (action == 1 || action == 2) {
         step_cpu = true;
     }
+}
+
+operator[] <T>(array: [] T, index: array_count_type) -> T {
+    
 }
 
 func main() {
