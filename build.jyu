@@ -22,7 +22,7 @@ func wide_to_mb(wide: *wchar_t) -> string {
     return to_string(data);
 }
 
-func compile_c_lib(src_path: string, output_no_ext: string) {
+func compile_c_lib(src_path: string, output_no_ext: string, create_library = false) {
     #if os(Windows) {
         #import "microsoft_craziness";
 
@@ -51,40 +51,47 @@ func compile_c_lib(src_path: string, output_no_ext: string) {
         args.add(concat("/I", concat(vsroot, "\\include")));
         args.add(src_path);
         args.add("/c");
-        args.add("/Fo.temp_c.obj");
+        args.add(concat("/Fo", concat(output_no_ext, ".o")));
 
         run_command(get_slice(args));
         args.reset();
 
-        args.add(lib_exe);
-        args.add(".temp_c.obj");
-        args.add(concat("/out:", concat(output_no_ext, ".lib")));
-        run_command(get_slice(args));
-        args.reset();
+        if (create_library) {
+            args.add(lib_exe);
+            args.add(concat(output_no_ext, ".o"));
+            args.add(concat("/out:", concat(output_no_ext, ".lib")));
+            run_command(get_slice(args));
+            args.reset();
+        }
     } else {
         var args: [..] string;
         args.add("gcc");
         args.add("-c");
         args.add("-o");
-        args.add(".temp_c.obj");
+        args.add(concat(output_no_ext, ".o"));
 
         args.add(src_path);
         run_command(get_slice(args));
         args.reset();
 
-        args.add("ar");
-        args.add("-r");
-        args.add(concat(output_no_ext, ".a"));
-        args.add(".temp_c.obj");
-        run_command(get_slice(args));
-        args.reset();
+        if (create_library) {
+            args.add("ar");
+            args.add("-r");
+            args.add(concat(output_no_ext, ".a"));
+            args.add(concat(output_no_ext, ".o"));
+            run_command(get_slice(args));
+            args.reset();
+        }
     }
 }
+
+func @c_function rename(old: *uint8, new: *uint8) -> int32;
 
 func @metaprogram main() {
     var as_metaprogram = false;
 
     mkdir("run_tree");
+    mkdir("build");
 
     var options: Build_Options;
     options.executable_name = "run_tree/a2600";
@@ -93,14 +100,12 @@ func @metaprogram main() {
 
     var compiler = create_compiler_instance(*options);
     var cwd = get_working_directory();
-    compiler_add_library_search_path(compiler, concat(cwd, "/run_tree"));
+    compiler_add_library_search_path(compiler, concat(cwd, "/build"));
     compiler_add_library_search_path(compiler, concat(cwd, "/src"));
 
-    #if os(Windows) {
-        compile_c_lib("src/stb_truetype.c", "run_tree/stb_truetype");
-    } else {
-        compile_c_lib("src/stb_truetype.c", "run_tree/libstb_truetype");
-    }
+    compiler_add_compiled_object_for_linking(compiler, "build/stb_truetype.o");
+
+    compile_c_lib("src/stb_truetype.c", "build/stb_truetype", true);
 
     if compiler_load_file(compiler, "src/main.jyu") != true return;
     if compiler_typecheck_program(compiler) != true return;
