@@ -476,7 +476,7 @@ struct M6507 {
 
                 this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
 
-            // Shift Right Logical
+            // Shift Right Logical (LSR)
             case 0x4A, 0x46, 0x56, 0x4E, 0x5E:
                 var reg = op & CC_BITS;
 
@@ -511,19 +511,19 @@ struct M6507 {
                     this.set_byte(result.address, value);
                 }
 
-            // Shift Left Logical
+            // Shift Left Logical (ASL)
             case 0x0A, 0x06, 0x16, 0x0E, 0x1E:
                 var reg = op & CC_BITS;
 
                 var value: uint8;
-                if op == 0x4A {
-                    // LSR A
+                if op == 0x0A {
+                    // ASL A
                     var reg_value = this.regs[reg];
-                    var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
+                    var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
 
                     this.regs[REG_A] = this.regs[REG_A] << 1;
 
-                    flags |= this.regs[reg] & STATUS_SIGN;
+                    flags |= this.regs[REG_A] & STATUS_SIGN;
                     if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
 
                     // Clear sign flag always
@@ -535,14 +535,88 @@ struct M6507 {
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
-                    var flags = value & STATUS_CARRY; // move bit 0 into carry flag
+                    var flags = (value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
 
                     value = value << 1;
 
-                    flags |= this.regs[reg] & STATUS_SIGN;
+                    flags |= value & STATUS_SIGN;
                     if value == 0 flags |= STATUS_ZERO;
 
                     // Clear sign flag always
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
+                    this.set_byte(result.address, value);
+                }
+
+            // ROL
+            case 0x2A, 0x26, 0x36, 0x2E, 0x3E:
+                var reg = op & CC_BITS;
+
+                var value: uint8;
+                if op == 0x0A {
+                    // ROL A
+                    var reg_value = this.regs[reg];
+                    var carry = this.P & STATUS_CARRY;
+                    var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
+
+                    this.regs[REG_A] = (this.regs[REG_A] << 1) | carry;
+
+                    flags |= this.regs[REG_A] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+                    clks_ticked += 2;
+                }  else {
+                    // is is_for_load correct here?
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    value = this.get_byte(result.address);
+                    clks_ticked += result.clks_ticked + 2;
+
+                    var carry = this.P & STATUS_CARRY;
+                    var flags = (value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
+
+                    value = (value << 1) | carry;
+
+                    flags |= value & STATUS_SIGN;
+                    if value == 0 flags |= STATUS_ZERO;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+
+                    this.set_byte(result.address, value);
+                }
+
+            // ROR
+            case 0x6A, 0x66, 0x76, 0x6E, 0x7E:
+                var reg = op & CC_BITS;
+
+                var value: uint8;
+                if op == 0x0A {
+                    // ROR A
+                    var reg_value = this.regs[reg];
+                    var carry = (this.P & STATUS_CARRY) << 7;
+                    var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
+
+                    this.regs[REG_A] = ((this.regs[REG_A] >> 1) & 0x7F) | carry;
+
+                    flags |= this.regs[REG_A] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
+                    clks_ticked += 2;
+                }  else {
+                    // is is_for_load correct here?
+                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    value = this.get_byte(result.address);
+                    clks_ticked += result.clks_ticked + 2;
+
+                    var carry = (this.P & STATUS_CARRY) << 7;
+                    var flags = (value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
+
+                    value = ((value >> 1) & 0x7F) | carry;
+
+                    flags |= value & STATUS_SIGN;
+                    if value == 0 flags |= STATUS_ZERO;
+
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
 
                     this.set_byte(result.address, value);
