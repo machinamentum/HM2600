@@ -14,23 +14,23 @@
 // #import "Basic"; // assert
 // #import "Reference";
 
-operator[] <T>(arr: [..] T, index: array_count_type) -> T {
-    assert(index >= 0 && index < arr.count, "Array index out of range!");
+operator[] <T, R>(arr: [..] T, index: R) -> T {
+    assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
     return arr.data[index];
 }
 
-operator[] <T>(arr: [] T, index: array_count_type) -> T {
-    assert(index >= 0 && index < arr.count, "Array index out of range!");
+operator[] <T, R>(arr: [] T, index: R) -> T {
+    assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
     return arr.data[index];
 }
 
-operator[]= <T>(arr: [..] T, index: array_count_type, value: T) {
-    assert(index >= 0 && index < arr.count, "Array index out of range!");
+operator[]= <T, R>(arr: [..] T, index: R, value: T) {
+    assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
     arr.data[index] = value;
 }
 
-operator[]= <T>(arr: [] T, index: array_count_type, value: T) {
-    assert(index >= 0 && index < arr.count, "Array index out of range!");
+operator[]= <T, R>(arr: [] T, index: R, value: T) {
+    assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
     arr.data[index] = value;
 }
 
@@ -192,25 +192,20 @@ struct TIA {
     }
 
     func calculate_color(this: *TIA, value: uint8) -> uint32 {
-        var lum = (value & 0xb1110) >> 1;
-        var lumf = ((cast(float) lum) / 7);
+        var lum = ((value & 0b1110) >> 1) + 1; // +1 to bring everything just a little off-black
+        var lumf = cast(float) lum / 8.0;
 
         var src = this.color_table[(value & 0xF0) >> 4];
 
-        if lumf == 0 {
-            // @Hack to prevent colors from going complete black
-            lumf = 0.05;
-        } 
-
-        var a = cast(float) ((src & 0xFF0000) >> 16) / 255.0;
-        var b = cast(float) ((src & 0x00FF00) >> 8) / 255.0;
-        var c = cast(float) ((src & 0x0000FF) >> 0) / 255.0;
+        var a = cast(float) ((src & 0xFF0000) >> 16);
+        var b = cast(float) ((src & 0x00FF00) >> 8);
+        var c = cast(float) ((src & 0x0000FF) >> 0);
 
         a *= lumf;
         b *= lumf;
         c *= lumf;
 
-        return (cast(uint32) a << 16) | (cast(uint32) b << 8) | cast(uint32) c;
+        return (cast(uint32) a << 16) | (cast(uint32) b << 8) | (cast(uint32) c << 0) | 0xFF000000;
     }
 
     func read(entry: *Memory_Map_Entry, _addr: uint16) -> (handled: bool, value: uint8) {
@@ -260,7 +255,7 @@ struct TIA {
 
         var current_pixel = this.current_pixel_clock - HBLANK_PIXELS;
 
-        var color: uint32 = this.color_table[0] | 0xFF000000;
+        var color: uint32 = calculate_color(this, this.write_regs[COLUBK]);
 
         this.framebuffer[current_pixel + this.current_scanline * PIXELS_PER_SCANLINE] = color;
 
@@ -330,6 +325,8 @@ func main() {
 
     init_gl_functions(get_proc);
 
+    glEnable(GL_FRAMEBUFFER_SRGB);
+
     glDebugMessageCallback(cast() debug_func, null);
     glEnable(GL_DEBUG_OUTPUT);
 
@@ -393,17 +390,19 @@ func main() {
 
 
         if step_cpu {
-            // step_cpu = false;
-            var clks = cpu.step();
+            for 0..20 {
+                // step_cpu = false;
+                var clks = cpu.step();
 
-            if clks == 0 {
-                step_cpu = false;
-            }
+                if clks == 0 {
+                    step_cpu = false;
+                }
 
-            for 0..<clks {
-                tia.step();
-                tia.step();
-                tia.step();
+                for 0..<clks {
+                    tia.step();
+                    tia.step();
+                    tia.step();
+                }
             }
         }
 
@@ -504,6 +503,11 @@ func main() {
         my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
         snprintf(buf.data, buf.count, "PF2: %02X", tia.write_regs[TIA.PF2]);
         my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
+
+        snprintf(buf.data, buf.count, "COLUPF: %02X", tia.write_regs[TIA.COLUPF]);
+        my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
+        snprintf(buf.data, buf.count, "COLUBK: %02X", tia.write_regs[TIA.COLUBK]);
+        my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
 
         glDisable(GL_BLEND);
 
