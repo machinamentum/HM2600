@@ -295,6 +295,11 @@ func key_callback(window: *GLFWwindow, key: int32, scancode: int32, action: int3
     }
 }
 
+func debug_func (source: GLenum, type: GLenum, id: GLuint, severity: GLenum, length: GLsizei, message: *GLchar, userParam: *void) -> void {
+    printf("Message: %s\n", message);
+    assert(false);
+}
+
 func main() {
     var rom_image = read_entire_file("game.bin");
 
@@ -324,6 +329,9 @@ func main() {
     }
 
     init_gl_functions(get_proc);
+
+    glDebugMessageCallback(cast() debug_func, null);
+    glEnable(GL_DEBUG_OUTPUT);
 
     var cpu: M6507;
 

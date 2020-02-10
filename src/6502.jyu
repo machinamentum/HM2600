@@ -82,7 +82,7 @@ struct M6507 {
 
     let REG_S: uint8 = 3;
 
-    var regs: [4] uint8;
+    var regs: [32] uint8;
     var PC: uint16;
     
     var P : uint8; // Status register
@@ -277,18 +277,18 @@ struct M6507 {
     }
 
     func step(this: *M6507) -> int {
-        printf("PC: %04X\n", this.PC);
+        // printf("PC: %04X\n", this.PC);
 
         var op = this.get_byte(this.PC);
         this.PC += 1;
 
-        printf("REG A: %02X\n", this.regs[REG_A]);
-        printf("REG X: %02X\n", this.regs[REG_X]);
-        printf("REG Y: %02X\n", this.regs[REG_Y]);
-        printf("REG S: %02X\n", this.regs[REG_S]);
-        printf("REG P: %02X\n", this.P);
+        // printf("REG A: %02X\n", this.regs[REG_A]);
+        // printf("REG X: %02X\n", this.regs[REG_X]);
+        // printf("REG Y: %02X\n", this.regs[REG_Y]);
+        // printf("REG S: %02X\n", this.regs[REG_S]);
+        // printf("REG P: %02X\n", this.P);
 
-        printf("Opcode: %02X\n", op);
+        // printf("Opcode: %02X\n", op);
 
         var clks_ticked = 0;
 
@@ -716,7 +716,7 @@ struct M6507 {
 
             case 0x60:
                 this.PC = this.stack_pop_word();
-                printf("NEW PC: %04X\n", this.PC);
+                // printf("NEW PC: %04X\n", this.PC);
                 clks_ticked += 6;
 
             case 0xE8, 0xC8: // INC X, INC Y
