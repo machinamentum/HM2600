@@ -89,6 +89,19 @@ struct M6507 {
 
     var memory: Memory_Map;
 
+    var dry_run = false;
+
+    func do_dry_run(this: *M6507) -> int {
+        // save all the state of this then restore the state afterwords
+        var state = <<this;
+        this.dry_run = true;
+        var clks_ticked = this.step();
+        this.dry_run = false;
+
+        <<this = state;
+        return clks_ticked;
+    }
+
     let STATUS_CARRY   : uint8 = (1 << 0); // 0 = no carry, 1 = carry
     let STATUS_ZERO    : uint8 = (1 << 1); // 0 = non zero, 1 = zero
     let STATUS_IRQ     : uint8 = (1 << 2); // 0 = IRQ enable, 1 = IRQ disable
@@ -872,6 +885,8 @@ struct M6507 {
     }
 
     func set_byte(this: *M6507, _addr: uint16, value: uint8) {
+        if this.dry_run return; // Do not write out to memory in a dry run
+
         var addr = _addr;
         addr &= ADDRESS_BITS;
 

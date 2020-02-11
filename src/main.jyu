@@ -149,9 +149,9 @@ struct PIA {
                 case TIM1T, TIM8T, TIM64T, TIM1024T:
                     return (true, this.timXt_regs[reg-TIM1T]);
                 case SWCHB:
-                    let RESET_BUTTON = (1 << 0); // 0 = pressed @TODO
+                    let RESET_BUTTON  = (1 << 0); // 0 = pressed @TODO
                     let SELECT_BUTTON = (1 << 1); // 0 = pressed @TODO
-                    let COLOR_MODE = (1 << 3); // 0 = Black/White, 1 = Color
+                    let COLOR_MODE    = (1 << 3); // 0 = Black/White, 1 = Color
 
 
                     return (true, (this.swbcnt & 0b110100) | COLOR_MODE | RESET_BUTTON | SELECT_BUTTON);
@@ -231,6 +231,8 @@ struct TIA {
 
     var vsync_ticker: uint8;
 
+    var missile_pos: [2] uint8;
+
     let WSYNC  = 0x02;
 
     let VSYNC  = 0x00;
@@ -243,6 +245,17 @@ struct TIA {
     let PF0    = 0x0D;
     let PF1    = 0x0E;
     let PF2    = 0x0F;
+
+    let GRP0   = 0x1B;
+    let GRP1   = 0x1C;
+
+    let ENAM0  = 0x1D;
+    let ENAM1  = 0x1E;
+    let ENABL  = 0x1F;
+
+    let HMM0   = 0x22;
+    let HMM1   = 0x23;
+    let HMBL   = 0x24;
 
     func init(this: *TIA) {
         // Taken from the full luminance values from here
@@ -318,8 +331,10 @@ struct TIA {
         if addr == WSYNC {
             waiting_for_wsync = true;
         } else if addr == VSYNC {
-            if (value & 0b10) this.vsync_ticker = 0;
-            // printf("VSYNC\n");
+
+            if (value & 0b10) {
+                this.vsync_ticker += 1;
+            }
         }
 
         this.write_regs[addr] = value;
@@ -349,39 +364,44 @@ struct TIA {
             color = colubk;
 
             // Playfield
-            var pfpos = (current_pixel / 4) % 20; // 40 dots across the entire scanline, 20 total bits
+            {
+                var pfpos = (current_pixel / 4) % 20; // 40 dots across the entire scanline, 20 total bits
+                var ctrlpf = this.write_regs[CTRLPF];
 
-            var ctrlpf = this.write_regs[CTRLPF];
+                if (ctrlpf & 1) != 0 && (current_pixel / 4) >= 20 {
+                    pfpos = 19 - pfpos;
+                }
 
-            if (ctrlpf & 1) != 0 && (current_pixel / 4) >= 20 {
-                pfpos = 19 - pfpos;
-            }
+                if (ctrlpf & 0b10) {
+                    // score mode
+                    colupf = colup0;
+                    if (current_pixel / 4) >= 20 {
+                        colupf = colup1;
+                    }
+                }
 
-            if (ctrlpf & 0b10) {
-                // score mode
-                colupf = colup0;
-                if (current_pixel / 4) >= 20 {
-                    colupf = colup1;
+                if pfpos < 4 {
+                    var bits = (this.write_regs[PF0] & 0xF0) >> 4;
+                    if bits & (1 << pfpos) {
+                        color = colupf;
+                    }
+                } else if pfpos < 12 {
+                    pfpos -= 4;
+                    var bits = this.write_regs[PF1];
+                    if bits & (1 << (7 - pfpos)) {
+                        color = colupf;
+                    }
+                } else {
+                    pfpos -= 12;
+                    var bits = this.write_regs[PF2];
+                    if bits & (1 << pfpos) {
+                        color = colupf;
+                    }
                 }
             }
 
-            if pfpos < 4 {
-                var bits = (this.write_regs[PF0] & 0xF0) >> 4;
-                if bits & (1 << pfpos) {
-                    color = colupf;
-                }
-            } else if pfpos < 12 {
-                pfpos -= 4;
-                var bits = this.write_regs[PF1];
-                if bits & (1 << (8 - pfpos)) {
-                    color = colupf;
-                }
-            } else {
-                pfpos -= 12;
-                var bits = this.write_regs[PF2];
-                if bits & (1 << pfpos) {
-                    color = colupf;
-                }
+            {
+
             }
         }
 
@@ -399,7 +419,7 @@ struct TIA {
             }
 
             if (this.write_regs[VSYNC] & 0b10) {
-                if (this.vsync_ticker < 3) this.vsync_ticker += 1;
+                if (this.vsync_ticker > 0 && this.vsync_ticker < 3) this.vsync_ticker += 1;
             } else {
                 if this.vsync_ticker >= 3 {
                     this.current_scanline = 0;
@@ -534,10 +554,19 @@ func main(argc: int32, argv: **uint8) {
         glClear(GL_COLOR_BUFFER_BIT);
         glClearColor(0.2, 0.2, 0.2, 1);
 
-
+        step_cpu = true;
         if step_cpu {
             if single_step step_cpu = false;
             while !vsync_triggered {
+                var clks_needed = cpu.do_dry_run();
+                if waiting_for_wsync clks_needed = 1;
+
+                for 0..<clks_needed {
+                    tia.step();
+                    tia.step();
+                    tia.step();
+                }
+
                 var clks = 1;
                 if !waiting_for_wsync {
                     clks = cpu.step();
@@ -549,14 +578,6 @@ func main(argc: int32, argv: **uint8) {
 
                 if clks == 0 {
                     step_cpu = false;
-                }
-
-                
-
-                for 0..<clks {
-                    tia.step();
-                    tia.step();
-                    tia.step();
                 }
 
                 if single_step break;
