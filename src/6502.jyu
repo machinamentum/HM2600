@@ -211,9 +211,8 @@ struct M6507 {
     }
 
     func stack_pop_word(this: *M6507) -> uint16 {
-        // @TODO what is the correct order here?
-        var hi = cast(uint16) this.stack_pop_byte();
         var lo = cast(uint16) this.stack_pop_byte();
+        var hi = cast(uint16) this.stack_pop_byte();
 
         return lo | (hi << 8);
     }
@@ -228,9 +227,8 @@ struct M6507 {
         var lo = value & 0xFF;
         var hi = (value & 0xFF00) >> 8;
 
-        // @TODO what is the correct order here?
-        stack_push_byte(this, cast(uint8) lo);
         stack_push_byte(this, cast(uint8) hi);
+        stack_push_byte(this, cast(uint8) lo);
     }
 
     func do_addressing(this: *M6507, reg: uint8, mode: uint8, is_for_load: bool) -> (clks_ticked: int, address: uint16) {
@@ -298,18 +296,26 @@ struct M6507 {
     }
 
     func step(this: *M6507) -> int {
-        // printf("PC: %04X\n", this.PC);
 
         var op = this.get_byte(this.PC);
+
+        // if this.PC == 0xF075 {
+            if !this.dry_run {
+                // printf("PC: %04X\n", this.PC);
+                // printf("REG A: %02X\n", this.regs[REG_A]);
+                // printf("REG X: %02X\n", this.regs[REG_X]);
+                // printf("REG Y: %02X\n", this.regs[REG_Y]);
+                // printf("REG S: %02X\n", this.regs[REG_S]);
+                // printf("REG P: %02X\n", this.P);
+
+                // printf("Opcode: %02X\n", op);
+            }
+
+        //     // exit(1);
+        //     return 0;
+        // }
+
         this.PC += 1;
-
-        // printf("REG A: %02X\n", this.regs[REG_A]);
-        // printf("REG X: %02X\n", this.regs[REG_X]);
-        // printf("REG Y: %02X\n", this.regs[REG_Y]);
-        // printf("REG S: %02X\n", this.regs[REG_S]);
-        // printf("REG P: %02X\n", this.P);
-
-        // printf("Opcode: %02X\n", op);
 
         var clks_ticked = 0;
 
@@ -368,7 +374,7 @@ struct M6507 {
                     value = this.get_byte(result.address);
                 }
 
-                var final: uint16 = cast(uint16) this.regs[reg] + cast(uint16) (0xFF - value);
+                var final: uint16 = cast(uint16) this.regs[reg] + cast(uint16) (~value + 1);
                 var flags = cast(uint8) (final & STATUS_SIGN);
                 if (final & 0xFF) == 0 flags |= STATUS_ZERO;
                 if (final & 0x100) flags |= STATUS_CARRY;
@@ -398,7 +404,7 @@ struct M6507 {
                     value = this.get_byte(result.address);
                 }
 
-                var final: uint16 = cast(uint16) this.regs[reg] + cast(uint16) (0xFF - value);
+                var final: uint16 = cast(uint16) this.regs[reg] + cast(uint16) (~value + 1);
                 var flags = cast(uint8) (final & STATUS_SIGN);
                 if (final & 0xFF) == 0 flags |= STATUS_ZERO;
                 if (final & 0x100) flags |= STATUS_CARRY;
@@ -470,11 +476,11 @@ struct M6507 {
 
             // SBC
             case 0xE9, 0xE5, 0xF5, 0xED, 0xFD, 0xF9, 0xE1, 0xF1:
-                var reg =op & CC_BITS;
+                var reg = op & CC_BITS;
 
                 var value: uint8;
-                // immediate mode == 010 if cc == 01
-                if (op & BBB_BITS) == (0b010 << 2) {
+                // immediate mode
+                if op == 0xE9 {
                     value = this.get_byte(this.PC);
                     this.PC += 1;
                     clks_ticked += 2;
@@ -485,7 +491,7 @@ struct M6507 {
                 }
 
                 var reg_value = this.regs[reg];
-                var result = (cast(uint16) reg_value) + (0xFF - value) + (this.P & STATUS_CARRY) - 1;
+                var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) - 1 - value;
                 this.regs[reg] = cast(uint8) result;
 
                 var flags = this.regs[reg] & STATUS_SIGN;
@@ -758,14 +764,14 @@ struct M6507 {
                 clks_ticked += 5;
             case 0x20:
                 var nnnn = this.get_word(this.PC);
-                this.stack_push_word(this.PC+2);
+                this.stack_push_word(this.PC+1);
                 // Do we need to inc/dec the stack pointer here?
 
                 this.PC = nnnn;
                 clks_ticked += 6;
 
             case 0x60:
-                this.PC = this.stack_pop_word();
+                this.PC = this.stack_pop_word()+1;
                 // printf("NEW PC: %04X\n", this.PC);
                 clks_ticked += 6;
 
@@ -886,6 +892,10 @@ struct M6507 {
 
     func set_byte(this: *M6507, _addr: uint16, value: uint8) {
         if this.dry_run return; // Do not write out to memory in a dry run
+
+        if value == 0x3C {
+            printf("3C written near %04X\n", this.PC);
+        }
 
         var addr = _addr;
         addr &= ADDRESS_BITS;

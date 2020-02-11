@@ -194,6 +194,7 @@ struct PIA {
                         this.timer_divider = 8;
                     } else if reg == TIM64T {
                         this.timer_divider = 64;
+                        printf("TIMT64T: %02X\n", value);
                     } else if reg == TIM1024T {
                         this.timer_divider = 1024;
                     }
@@ -231,12 +232,17 @@ struct TIA {
 
     var vsync_ticker: uint8;
 
+    var player_pos : [2] uint8;
     var missile_pos: [2] uint8;
+    var ball_pos   : uint8;
 
     let WSYNC  = 0x02;
 
     let VSYNC  = 0x00;
     let VBLANK = 0x01;
+
+    let NUSIZ0 = 0x04;
+    let NUSIZ1 = 0x05;
     let COLUP0 = 0x06;
     let COLUP1 = 0x07;
     let COLUPF = 0x08;
@@ -245,6 +251,11 @@ struct TIA {
     let PF0    = 0x0D;
     let PF1    = 0x0E;
     let PF2    = 0x0F;
+    let RESP0  = 0x10;
+    let RESP1  = 0x11;
+    let RESM0  = 0x12;
+    let RESM1  = 0x13;
+    let RESBL  = 0x14;
 
     let GRP0   = 0x1B;
     let GRP1   = 0x1C;
@@ -253,9 +264,21 @@ struct TIA {
     let ENAM1  = 0x1E;
     let ENABL  = 0x1F;
 
+    let HMP0   = 0x20;
+    let HMP1   = 0x21;
     let HMM0   = 0x22;
     let HMM1   = 0x23;
     let HMBL   = 0x24;
+
+    let HMOVE  = 0x2A;
+    let HMCLR  = 0x2B;
+
+    let INPT0  = 0x38;
+    let INPT1  = 0x39;
+    let INPT2  = 0x3A;
+    let INPT3  = 0x3B;
+    let INPT4  = 0x3C;
+    let INPT5  = 0x3D;
 
     func init(this: *TIA) {
         // Taken from the full luminance values from here
@@ -310,6 +333,25 @@ struct TIA {
 
         if (addr > 0xD) return (false, -1);
 
+        if addr >= INPT0 && addr <= INPT3 {
+            if this.write_regs[VBLANK] & (1 << 7) {
+                return (true, 0);
+            }
+        }
+        if addr == INPT0 {
+
+        } else if addr == INPT1 {
+
+        } else if addr == INPT2 {
+            
+        } else if addr == INPT3 {
+
+        } else if addr == INPT4 {
+            return (true, 1 << 7); // @Incomplete
+        } else if addr == INPT5 {
+            return (true, 1 << 7); // @Incomplete
+        }
+
         // @Incomplete
         return (true, 0);
     }
@@ -334,6 +376,41 @@ struct TIA {
 
             if (value & 0b10) {
                 this.vsync_ticker += 1;
+            }
+        } else if addr == HMOVE {
+            // printf("HMM0: %02X\n", HMM0);
+            // printf("HMM1: %02X\n", HMM1);
+            // printf("HMP0: %02X\n", HMP0);
+            // printf("HMP1: %02X\n", HMP1);
+            this.missile_pos[0] += cast(uint8) (cast(int8) this.write_regs[HMM0] >> 4);
+            this.missile_pos[1] += cast(uint8) (cast(int8) this.write_regs[HMM1] >> 4);
+
+            this.player_pos[0]  += cast(uint8) (cast(int8) this.write_regs[HMP0] >> 4);
+            this.player_pos[1]  += cast(uint8) (cast(int8) this.write_regs[HMP1] >> 4);
+
+            this.ball_pos       += cast(uint8) (cast(int8) this.write_regs[HMBL] >> 4);
+
+            // printf("HMM0: %d\n", cast(int32) (cast(int8) this.write_regs[HMM0] >> 4));
+            // printf("HMM1: %d\n", cast(int32) (cast(int8) this.write_regs[HMM1] >> 4));
+
+            // printf("HMP0: %d\n", cast(int32) (cast(int8) this.write_regs[HMP0] >> 4));
+            // printf("HMP1: %d\n", cast(int32) (cast(int8) this.write_regs[HMP1] >> 4));
+
+            // printf("HMBL: %d\n", cast(int32) (cast(int8) this.write_regs[HMBL] >> 4));
+        } else if addr == RESP0 || addr == RESP1 {
+            this.player_pos[addr-RESP0] = this.current_pixel_clock - HBLANK_PIXELS;
+            if this.current_pixel_clock < HBLANK_PIXELS this.player_pos[addr-RESP0] = 3;
+        } else if addr == RESM0 || addr == RESM1 {
+            this.missile_pos[addr-RESM0] = this.current_pixel_clock - HBLANK_PIXELS;
+            if this.current_pixel_clock < HBLANK_PIXELS this.missile_pos[addr-RESM0] = 2;
+        } else if addr == RESBL {
+            this.ball_pos = this.current_pixel_clock - HBLANK_PIXELS;
+            if this.current_pixel_clock < HBLANK_PIXELS this.ball_pos = 2;
+        } else if addr == GRP0 {
+            printf("GRP0: %02X\n", value);
+        } else if addr == HMCLR {
+            for HMP0..HMBL {
+                this.write_regs[it] = 0;
             }
         }
 
@@ -401,7 +478,43 @@ struct TIA {
             }
 
             {
+                if (this.write_regs[ENABL] & 0b10) != 0 && current_pixel == this.ball_pos {
+                    color = colupf;
+                }
 
+                if (this.write_regs[ENAM0] & 0b10) != 0 && current_pixel >= this.missile_pos[0] {
+                    var size = (this.write_regs[NUSIZ0] & 0b00110000) >> 4;
+                    size = (1 << size);
+
+                    if current_pixel < this.missile_pos[0] + size {
+                        color = colup0;
+                    }
+                }
+
+                if (this.write_regs[ENAM1] & 0b10) != 0 && current_pixel >= this.missile_pos[1] {
+                    var size = (this.write_regs[NUSIZ1] & 0b00110000) >> 4;
+                    size = (1 << size);
+
+                    if current_pixel < this.missile_pos[1] + size {
+                        color = colup1;
+                    }
+                }
+
+                if current_pixel >= this.player_pos[0] && current_pixel < this.player_pos[0] + 8 {
+                    var bit = 7 - (current_pixel - this.player_pos[0]);
+
+                    if this.write_regs[GRP0] & (1 << bit) {
+                        color = colup0;
+                    }
+                }
+
+                if current_pixel >= this.player_pos[1] && current_pixel < this.player_pos[1] + 8 {
+                    var bit = 7 - (current_pixel - this.player_pos[1]);
+
+                    if this.write_regs[GRP1] & (1 << bit) {
+                        color = colup1;
+                    }
+                }
             }
         }
 
@@ -482,6 +595,8 @@ func main(argc: int32, argv: **uint8) {
 
     glfwMakeContextCurrent(window);
 
+    glfwSwapInterval(1); // @Hack
+
     glfwSetKeyCallback(window, cast() key_callback);
 
     func get_proc(name: string) -> *void {
@@ -491,10 +606,10 @@ func main(argc: int32, argv: **uint8) {
 
     init_gl_functions(get_proc);
 
-    glEnable(GL_FRAMEBUFFER_SRGB);
+    // glEnable(GL_FRAMEBUFFER_SRGB);
 
-    glDebugMessageCallback(cast() debug_func, null);
-    glEnable(GL_DEBUG_OUTPUT);
+    // glDebugMessageCallback(cast() debug_func, null);
+    // glEnable(GL_DEBUG_OUTPUT);
 
     var cpu: M6507;
 
@@ -516,6 +631,10 @@ func main(argc: int32, argv: **uint8) {
     pia_map.write = PIA.write;
 
     cpu.memory.mappings.add(pia_map);
+
+    for *pia.ram {
+        <<it = 0xFF;
+    }
 
     var tia: TIA;
     tia.init();
@@ -554,10 +673,14 @@ func main(argc: int32, argv: **uint8) {
         glClear(GL_COLOR_BUFFER_BIT);
         glClearColor(0.2, 0.2, 0.2, 1);
 
-        step_cpu = true;
+        // step_cpu = true;
         if step_cpu {
             if single_step step_cpu = false;
             while !vsync_triggered {
+                while waiting_for_wsync {
+                    tia.step();
+                }
+
                 var clks_needed = cpu.do_dry_run();
                 if waiting_for_wsync clks_needed = 1;
 
@@ -578,6 +701,7 @@ func main(argc: int32, argv: **uint8) {
 
                 if clks == 0 {
                     step_cpu = false;
+                    break;
                 }
 
                 if single_step break;
@@ -602,7 +726,7 @@ func main(argc: int32, argv: **uint8) {
         }
 
         glViewport(0, 0, cast(GLsizei) (width * xscale), cast(GLsizei) (height * yscale));
-        glOrtho(0, width*xscale, height*yscale, 0, -1, 1);
+        glOrtho(0, width, height, 0, -1, 1);
 
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, fb_tex);
@@ -641,10 +765,20 @@ func main(argc: int32, argv: **uint8) {
         var text_height: float = 32;
         var y_offset: float;
         var x_offset: float;
+
+        my_stbtt_print(playfield_width, y_offset + text_height*1, "  0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F");
+        y_offset += text_height;
+
         for pia.ram {
             if (it_index % 16) == 0 && it_index != 0 {
                 x_offset = 0;
                 y_offset += 32;
+            }
+
+            if (it_index % 16) == 0 {
+                var buf: [32] uint8;
+                snprintf(buf.data, buf.count, "%X ", (it_index / 16) + 8);
+                x_offset += my_stbtt_print(playfield_width + x_offset, y_offset + text_height, to_string(buf.data));
             }
 
             var buf: [4] uint8;
@@ -692,8 +826,11 @@ func main(argc: int32, argv: **uint8) {
         snprintf(buf.data, buf.count, "CTRLPF: %02X", tia.write_regs[TIA.CTRLPF]);
         my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
 
-        snprintf(buf.data, buf.count, "COMBAT SCANLINE: %02X", cpu.get_byte(0xB4));
+        snprintf(buf.data, buf.count, "BALL POS: %d", tia.ball_pos);
         my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
+
+        // snprintf(buf.data, buf.count, "COMBAT SCANLINE: %02X", cpu.get_byte(0xB4));
+        // my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
 
         glDisable(GL_BLEND);
 
