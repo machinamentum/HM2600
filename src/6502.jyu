@@ -872,6 +872,9 @@ struct M6507 {
 
         success = this.memory.write(addr, value);
         // assert(success, "set_byte failed");
+        if !success {
+            printf("Failed write around %04X\n", this.PC);
+        }
     }
 
     func set_word(this: *M6507, _addr: uint16, value: uint16) {
