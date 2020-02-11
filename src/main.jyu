@@ -110,6 +110,18 @@ func cartridge_write(entry: *Memory_Map_Entry, _addr: uint16, value: uint8) -> b
 struct PIA {
     var ram: [128] uint8;
 
+    var timer_value  : uint8;
+    var timer_ticks  : uint16;
+    var timer_divider: uint16 = 1;
+
+    var timXt_regs: [4] uint8;
+
+    let INTIM    = 0x284; // @ReadOnly
+    let TIM1T    = 0x294;
+    let TIM8T    = 0x295;
+    let TIM64T   = 0x296;
+    let TIM1024T = 0x297;
+
     func read(entry: *Memory_Map_Entry, _addr: uint16) -> (handled: bool, value: uint8) {
         if !(((_addr & A12) == 0) && ((_addr & A7) != 0)) return (false, -1);
 
@@ -122,6 +134,16 @@ struct PIA {
             // PIA registers @TODO
 
             // @Incomplete
+
+            var reg = addr & 0x2FF;
+
+            switch (reg) {
+                case INTIM:
+                    return (true, this.timer_value);
+                case TIM1T, TIM8T, TIM64T, TIM1024T:
+                    return (true, this.timXt_regs[reg-TIM1T]);
+            }
+
             return (true, -1);
         } else {
             addr = addr & 0x7F;
@@ -130,9 +152,8 @@ struct PIA {
     }
 
     func write(entry: *Memory_Map_Entry, _addr: uint16, value: uint8) -> bool {
-        printf("ADDR: %04X\n", _addr);
+        // printf("ADDR: %04X\n", _addr);
         if !(((_addr & A12) == 0) && ((_addr & A7) != 0)) return false;
-        printf("asdfsdaf: %04X\n", _addr);
 
         var addr = _addr;
         addr &= M6507.ADDRESS_BITS;
@@ -143,12 +164,44 @@ struct PIA {
             // PIA registers @TODO
 
             // @Incomplete
+            var reg = addr & 0x2FF;
+
+            switch (reg) {
+                case INTIM:
+                    return true;
+                case TIM1T, TIM8T, TIM64T, TIM1024T:
+                    this.timXt_regs[reg-TIM1T] = value;
+
+                    this.timer_value = value;
+                    this.timer_ticks = 0;
+
+                    if reg == TIM1T {
+                        this.timer_divider = 1;
+                    } else if reg == TIM8T {
+                        this.timer_divider = 8;
+                    } else if reg == TIM64T {
+                        this.timer_divider = 64;
+                    } else if reg == TIM1024T {
+                        this.timer_divider = 1024;
+                    }
+                    return true;
+            }
             return true;
         } else {
             addr = addr & 0x7F;
             this.ram[addr] = value;
             return true;
         }
+    }
+
+    func step(this: *PIA) {
+        if (this.timer_ticks % this.timer_divider) == 0 {
+            this.timer_value -= 1;
+        }
+
+        if (this.timer_ticks > this.timer_divider) this.timer_ticks -= this.timer_divider;
+
+        this.timer_ticks += 1;
     }
 }
 
@@ -161,8 +214,11 @@ struct TIA {
 
     var write_regs: [0x2D] uint8;
 
+    let WSYNC  = 0x02;
+
     let COLUPF = 0x08;
     let COLUBK = 0x09;
+    let CTRLPF = 0x0A;
     let PF0    = 0x0D;
     let PF1    = 0x0E;
     let PF2    = 0x0F;
@@ -201,9 +257,9 @@ struct TIA {
         var b = cast(float) ((src & 0x00FF00) >> 8);
         var c = cast(float) ((src & 0x0000FF) >> 0);
 
-        a *= lumf;
-        b *= lumf;
-        c *= lumf;
+        // a *= lumf;
+        // b *= lumf;
+        // c *= lumf;
 
         return (cast(uint32) a << 16) | (cast(uint32) b << 8) | (cast(uint32) c << 0) | 0xFF000000;
     }
@@ -238,6 +294,10 @@ struct TIA {
 
         if (addr > 0x2C) return false;
 
+        if addr == WSYNC {
+            waiting_for_wsync = true;
+        }
+
         this.write_regs[addr] = value;
         return true;
     }
@@ -255,13 +315,45 @@ struct TIA {
 
         var current_pixel = this.current_pixel_clock - HBLANK_PIXELS;
 
-        var color: uint32 = calculate_color(this, this.write_regs[COLUBK]);
+        var colubk = calculate_color(this, this.write_regs[COLUBK]);
+        var colupf = calculate_color(this, this.write_regs[COLUPF]);
+        var color: uint32 = colubk;
+
+        { // Playfield
+            var pfpos = (current_pixel / 4) % 20; // 40 dots across the entire scanline, 20 total bits
+
+            var ctrlpf = this.write_regs[CTRLPF];
+
+            if (ctrlpf & 1) != 0 && (current_pixel / 4) >= 20 {
+                pfpos = 20 - pfpos;
+            }
+
+            if pfpos < 4 {
+                var bits = (this.write_regs[PF0] & 0xF0) >> 4;
+                if bits & (1 << pfpos) {
+                    color = colupf;
+                }
+            } else if pfpos < 12 {
+                pfpos -= 4;
+                var bits = this.write_regs[PF1];
+                if bits & (1 << (8 - pfpos)) {
+                    color = colupf;
+                }
+            } else {
+                pfpos -= 12;
+                var bits = this.write_regs[PF2];
+                if bits & (1 << pfpos) {
+                    color = colupf;
+                }
+            }
+
+        }
 
         this.framebuffer[current_pixel + this.current_scanline * PIXELS_PER_SCANLINE] = color;
 
         this.current_pixel_clock += 1;
         if current_pixel+1 >= PIXELS_PER_SCANLINE {
-            // @Incomplete signal WSYNC
+            waiting_for_wsync = false;
             this.current_pixel_clock = 0;
 
             this.current_scanline += 1;
@@ -294,6 +386,8 @@ func debug_func (source: GLenum, type: GLenum, id: GLuint, severity: GLenum, len
     printf("Message: %s\n", message);
     assert(false);
 }
+
+var waiting_for_wsync = false;
 
 func main() {
     var rom_image = read_entire_file("game.bin");
@@ -392,10 +486,18 @@ func main() {
         if step_cpu {
             for 0..20 {
                 // step_cpu = false;
-                var clks = cpu.step();
+
+                var clks = 1;
+                if !waiting_for_wsync {
+                    clks = cpu.step();
+                }
 
                 if clks == 0 {
                     step_cpu = false;
+                }
+
+                for 0..<clks {
+                    pia.step();
                 }
 
                 for 0..<clks {
@@ -508,6 +610,9 @@ func main() {
         my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
         snprintf(buf.data, buf.count, "COLUBK: %02X", tia.write_regs[TIA.COLUBK]);
         my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
+
+        snprintf(buf.data, buf.count, "CTRLPF: %02X", tia.write_regs[TIA.CTRLPF]);
+        my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
 
         glDisable(GL_BLEND);
 

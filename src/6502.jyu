@@ -94,6 +94,7 @@ struct M6507 {
     let STATUS_IRQ     : uint8 = (1 << 2); // 0 = IRQ enable, 1 = IRQ disable
     let STATUS_DEC     : uint8 = (1 << 3); // 0 = normal, 1 = BCD mode
     let STATUS_BREAK   : uint8 = (1 << 4); // 0 = IRQ/NMI, 1 = RESET or BRK/PHP
+    let STATUS_UNUSED  : uint8 = (1 << 5); // unused
     let STATUS_OVERFLOW: uint8 = (1 << 6); // 1 = overflow
     let STATUS_SIGN    : uint8 = (1 << 7); // 0 = positive, 1 = negative
 
@@ -643,7 +644,36 @@ struct M6507 {
                     var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, true);
                     clks_ticked += result.clks_ticked;
 
-                    this.regs[REG_A] = this.regs[REG_A] & this.get_byte(result.address);
+                    this.regs[REG_A] &= this.get_byte(result.address);
+
+                    var flags = this.regs[REG_A] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+                }
+
+            // OR
+            case 0x09, 0x05, 0x15, // Zero page ops
+                 0x0D, 0x1D, 0x19, // absolute ops
+                 0x01, 0x11:       // indirect ops
+
+                // immediate version
+                if (op == 0x09) {
+                    var nn = this.get_byte(this.PC);
+                    this.PC += 1;
+                    clks_ticked += 2;
+
+                    this.regs[REG_A] |= nn;
+
+                    var flags = this.regs[REG_A] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
+                } else {
+                    var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, true);
+                    clks_ticked += result.clks_ticked;
+
+                    this.regs[REG_A] |= this.get_byte(result.address);
 
                     var flags = this.regs[REG_A] & STATUS_SIGN;
                     if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
@@ -793,6 +823,25 @@ struct M6507 {
                 clks_ticked += do_cond_branch(this, (this.P & STATUS_ZERO) == 0);
             case 0xF0:
                 clks_ticked += do_cond_branch(this, (this.P & STATUS_ZERO) != 0);
+
+            case 0x48: // PUSH A
+                this.stack_push_byte(this.regs[REG_A]);
+                clks_ticked += 3;
+            case 0x08: // PUSH p
+                this.stack_push_byte(this.P);
+                clks_ticked += 3;
+            case 0x68: // POP A
+                clks_ticked += 4;
+                var value = this.stack_pop_byte();
+                this.regs[REG_A] = value;
+
+                var flags = value & STATUS_SIGN;
+                if value == 0 flags |= STATUS_ZERO;
+
+                this.set_flags(STATUS_ZERO | STATUS_SIGN, flags);
+            case 0x28: // POP P
+                this.P = this.stack_pop_byte() | STATUS_BREAK | STATUS_UNUSED;
+                clks_ticked += 4;
         
         }
 
