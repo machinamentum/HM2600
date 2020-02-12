@@ -72,6 +72,8 @@ struct M6507 {
 
     let CC_BITS = 0b00000011;
 
+    let AAA_BITS = 0b11100000;
+
     // Order is chosen to coincide the fact that  he lowest two bits
     // of the instruction format somewhat indicate the destination regiters.
     // Note that cc = 11 refers to undocumented instructions. Those instructions
@@ -141,18 +143,30 @@ struct M6507 {
             // then the hi byte would cross into 0x100? Or is it that nn+X
             // is calculated twice such that address 0xFF and 0x00 are used?
             // Currently we are doing the latter.
-            var lo: uint16 = this.get_byte(zero_page(this, offset, X_OFFSET));
-            var hi: uint16 = this.get_byte(zero_page(this, offset+1, X_OFFSET));
 
-            return absolute(this, lo | (hi << 8));
+            #if 0 {
+                var lo: uint16 = this.get_byte(zero_page(this, offset, X_OFFSET));
+                var hi: uint16 = this.get_byte(zero_page(this, offset+1, X_OFFSET));
+
+                return absolute(this, lo | (hi << 8));
+            } else {
+                var nnnn = this.get_word(zero_page(this, offset, X_OFFSET));
+                return absolute(this, nnnn);
+            }
         } else if register == Y_OFFSET {
             // @Incomplete same issue as the above case
-            var lo: uint16 = this.get_byte(zero_page(this, offset));
-            var hi: uint16 = this.get_byte(zero_page(this, offset+1));
 
-            var addr = lo | (hi << 8);
+            #if 0 {
+                var lo: uint16 = this.get_byte(zero_page(this, offset));
+                var hi: uint16 = this.get_byte(zero_page(this, offset+1));
 
-            return absolute(this, addr, Y_OFFSET);
+                var addr = lo | (hi << 8);
+
+                return absolute(this, addr, Y_OFFSET);
+            } else {
+                var nnnn = this.get_word(zero_page(this, offset));
+                return absolute(this, nnnn, Y_OFFSET);
+            }
         }
 
         assert(false);
@@ -231,17 +245,37 @@ struct M6507 {
         stack_push_byte(this, cast(uint8) lo);
     }
 
-    func do_addressing(this: *M6507, reg: uint8, mode: uint8, is_for_load: bool) -> (clks_ticked: int, address: uint16) {
+    func do_addressing(this: *M6507, op: uint8, is_for_load: bool) -> (clks_ticked: int, address: uint16) {
+        var reg = op & CC_BITS;
+        var mode = op & BBB_BITS;
+        var opcode = op & AAA_BITS;
+
         var addr: uint16;
         var offset_reg = NO_OFFSET;
 
         var clks_ticked = 0;
 
+        var is_stx_ldx = false;
+
+        if reg == REG_A {
+            assert(mode != 0b01000);
+        } else if reg == REG_X {
+            assert(mode != 0);
+            assert(mode != MODE_ZP_Y_INDIRECT);
+            assert(mode != 0b01000);
+
+            let STX = 0b100 << 5;
+            let LDX = 0b101 << 5;
+            if opcode == STX || opcode == LDX {
+                is_stx_ldx = true;
+            }
+        }
+
         if mode == MODE_ZP || mode == MODE_ZP_X {
             clks_ticked += 3;
             if mode == MODE_ZP_X {
                 offset_reg = X_OFFSET;
-                if reg == REG_X offset_reg = Y_OFFSET;
+                if is_stx_ldx offset_reg = Y_OFFSET;
 
                 clks_ticked += 1;
             }
@@ -257,7 +291,7 @@ struct M6507 {
 
             if mode == MODE_ABS_X {
                 offset_reg = X_OFFSET;
-                if reg == REG_X offset_reg = Y_OFFSET;
+                if is_stx_ldx offset_reg = Y_OFFSET;
 
                 if is_for_load && ((nnnn & 0xFF00) != ((nnnn + this.regs[offset_reg]) & 0xFF00)) {
                     clks_ticked += 1;
@@ -289,6 +323,8 @@ struct M6507 {
 
             var nn = get_byte(this, this.PC);
             this.PC += 1;
+
+            assert(offset_reg != NO_OFFSET);
             addr = indirect(this, nn, offset_reg);
         }
 
@@ -342,7 +378,7 @@ struct M6507 {
                  0xAC, 0xAD, 0xAE, 0xBC, 0xBD, 0xBE, 0xB9, // absolute ops
                  0xA1, 0xB1:                               // indirect ops
                 var reg = op & CC_BITS;
-                var result = this.do_addressing(reg, op & BBB_BITS, true);
+                var result = this.do_addressing(op, true);
                 clks_ticked += result.clks_ticked;
 
                 this.regs[reg] = this.get_byte(result.address);
@@ -368,7 +404,7 @@ struct M6507 {
                     value = nn;
                     clks_ticked += 2;
                 } else {
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     clks_ticked += result.clks_ticked;
 
                     value = this.get_byte(result.address);
@@ -398,7 +434,7 @@ struct M6507 {
                     value = nn;
                     clks_ticked += 2;
                 } else {
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     clks_ticked += result.clks_ticked;
 
                     value = this.get_byte(result.address);
@@ -417,7 +453,7 @@ struct M6507 {
                  0x8C, 0x8D, 0x8E, 0x9D, 0x99,       // absolute ops
                  0x81, 0x91:                         // indirect ops
                 var reg = op & CC_BITS;
-                var result = this.do_addressing(reg, op & BBB_BITS, false);
+                var result = this.do_addressing(op, false);
                 clks_ticked += result.clks_ticked;
 
                 this.set_byte(result.address, this.regs[reg]);
@@ -433,7 +469,7 @@ struct M6507 {
                     this.PC += 1;
                     clks_ticked += 2;
                 }  else {
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked;
                 }
@@ -447,7 +483,7 @@ struct M6507 {
 
             // ADC
             case 0x69, 0x65, 0x75, 0x6D, 0x7D, 0x79, 0x61, 0x71:
-                var reg =op & CC_BITS;
+                var reg = op & CC_BITS;
 
                 var value: uint8;
                 // immediate mode == 010 if cc == 01
@@ -456,7 +492,7 @@ struct M6507 {
                     this.PC += 1;
                     clks_ticked += 2;
                 }  else {
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked;
                 }
@@ -485,7 +521,7 @@ struct M6507 {
                     this.PC += 1;
                     clks_ticked += 2;
                 }  else {
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked;
                 }
@@ -522,7 +558,7 @@ struct M6507 {
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
@@ -558,7 +594,7 @@ struct M6507 {
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
@@ -580,7 +616,7 @@ struct M6507 {
                 var reg = op & CC_BITS;
 
                 var value: uint8;
-                if op == 0x0A {
+                if op == 0x2A {
                     // ROL A
                     var reg_value = this.regs[reg];
                     var carry = this.P & STATUS_CARRY;
@@ -595,7 +631,7 @@ struct M6507 {
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
@@ -617,7 +653,7 @@ struct M6507 {
                 var reg = op & CC_BITS;
 
                 var value: uint8;
-                if op == 0x0A {
+                if op == 0x6A {
                     // ROR A
                     var reg_value = this.regs[reg];
                     var carry = (this.P & STATUS_CARRY) << 7;
@@ -632,7 +668,7 @@ struct M6507 {
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
-                    var result = this.do_addressing(reg, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
@@ -667,7 +703,7 @@ struct M6507 {
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
                 } else {
-                    var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     clks_ticked += result.clks_ticked;
 
                     this.regs[REG_A] &= this.get_byte(result.address);
@@ -696,7 +732,7 @@ struct M6507 {
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
                 } else {
-                    var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, true);
+                    var result = this.do_addressing(op, true);
                     clks_ticked += result.clks_ticked;
 
                     this.regs[REG_A] |= this.get_byte(result.address);
@@ -790,7 +826,7 @@ struct M6507 {
 
             // INC memory
             case 0xE6, 0xF6, 0xEE, 0xFE:
-                var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, false);
+                var result = this.do_addressing(op, false);
                 var value = this.get_byte(result.address);
                 clks_ticked += result.clks_ticked + 2;
 
@@ -806,7 +842,7 @@ struct M6507 {
 
             // DEC memory
             case 0xC6, 0xD6, 0xCE, 0xDE:
-                var result = this.do_addressing(op & CC_BITS, op & BBB_BITS, false);
+                var result = this.do_addressing(op, false);
                 var value = this.get_byte(result.address);
                 clks_ticked += result.clks_ticked + 2;
 
@@ -822,7 +858,7 @@ struct M6507 {
 
             case 0x88, 0xCA: // DEC X, DEC Y
                 var reg = REG_X;
-                if op == 0xC8 reg = REG_Y;
+                if op == 0x88 reg = REG_Y;
 
                 this.regs[reg] -= 1;
 
@@ -886,16 +922,15 @@ struct M6507 {
         var value: uint8;
 
         (success, value) = this.memory.read(addr);
-        assert(success, "get_byte failed");
+        // assert(success, "get_byte failed");
+        if !success {
+            printf("Failed to read byte around %04X\n", this.PC);
+        }
         return value;
     }
 
     func set_byte(this: *M6507, _addr: uint16, value: uint8) {
         if this.dry_run return; // Do not write out to memory in a dry run
-
-        if value == 0x3C {
-            printf("3C written near %04X\n", this.PC);
-        }
 
         var addr = _addr;
         addr &= ADDRESS_BITS;

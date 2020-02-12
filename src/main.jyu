@@ -194,7 +194,6 @@ struct PIA {
                         this.timer_divider = 8;
                     } else if reg == TIM64T {
                         this.timer_divider = 64;
-                        printf("TIMT64T: %02X\n", value);
                     } else if reg == TIM1024T {
                         this.timer_divider = 1024;
                     }
@@ -333,6 +332,8 @@ struct TIA {
 
         if (addr > 0xD) return (false, -1);
 
+        addr |= 0x30;
+
         if addr >= INPT0 && addr <= INPT3 {
             if this.write_regs[VBLANK] & (1 << 7) {
                 return (true, 0);
@@ -347,6 +348,7 @@ struct TIA {
         } else if addr == INPT3 {
 
         } else if addr == INPT4 {
+            printf("INPT4\n");
             return (true, 1 << 7); // @Incomplete
         } else if addr == INPT5 {
             return (true, 1 << 7); // @Incomplete
@@ -382,13 +384,16 @@ struct TIA {
             // printf("HMM1: %02X\n", HMM1);
             // printf("HMP0: %02X\n", HMP0);
             // printf("HMP1: %02X\n", HMP1);
-            this.missile_pos[0] += cast(uint8) (cast(int8) this.write_regs[HMM0] >> 4);
-            this.missile_pos[1] += cast(uint8) (cast(int8) this.write_regs[HMM1] >> 4);
+            // printf("ASDASD p0pos: %d\n", this.player_pos[0]);
+            // printf("DIFF: %d\n", cast(int32) (cast(int8) this.write_regs[HMP0] >> 4));
 
-            this.player_pos[0]  += cast(uint8) (cast(int8) this.write_regs[HMP0] >> 4);
-            this.player_pos[1]  += cast(uint8) (cast(int8) this.write_regs[HMP1] >> 4);
+            this.missile_pos[0] = (this.missile_pos[0] + cast(uint8) (cast(int8) this.write_regs[HMM0] >> 4)) % 160;
+            this.missile_pos[1] = (this.missile_pos[1] + cast(uint8) (cast(int8) this.write_regs[HMM1] >> 4)) % 160;
 
-            this.ball_pos       += cast(uint8) (cast(int8) this.write_regs[HMBL] >> 4);
+            this.player_pos[0]  = (this.player_pos[0]  + cast(uint8) (cast(int8) this.write_regs[HMP0] >> 4)) % 160;
+            this.player_pos[1]  = (this.player_pos[1]  + cast(uint8) (cast(int8) this.write_regs[HMP1] >> 4)) % 160;
+
+            this.ball_pos       = (this.ball_pos       + cast(uint8) (cast(int8) this.write_regs[HMBL] >> 4)) % 160;
 
             // printf("HMM0: %d\n", cast(int32) (cast(int8) this.write_regs[HMM0] >> 4));
             // printf("HMM1: %d\n", cast(int32) (cast(int8) this.write_regs[HMM1] >> 4));
@@ -397,6 +402,8 @@ struct TIA {
             // printf("HMP1: %d\n", cast(int32) (cast(int8) this.write_regs[HMP1] >> 4));
 
             // printf("HMBL: %d\n", cast(int32) (cast(int8) this.write_regs[HMBL] >> 4));
+
+            // printf("BNBNBNBNBN p0pos: %d\n", this.player_pos[0]);
         } else if addr == RESP0 || addr == RESP1 {
             this.player_pos[addr-RESP0] = this.current_pixel_clock - HBLANK_PIXELS;
             if this.current_pixel_clock < HBLANK_PIXELS this.player_pos[addr-RESP0] = 3;
@@ -405,9 +412,9 @@ struct TIA {
             if this.current_pixel_clock < HBLANK_PIXELS this.missile_pos[addr-RESM0] = 2;
         } else if addr == RESBL {
             this.ball_pos = this.current_pixel_clock - HBLANK_PIXELS;
-            if this.current_pixel_clock < HBLANK_PIXELS this.ball_pos = 2;
+            if this.current_pixel_clock < HBLANK_PIXELS this.ball_pos = HBLANK_PIXELS + 2;
         } else if addr == GRP0 {
-            printf("GRP0: %02X\n", value);
+
         } else if addr == HMCLR {
             for HMP0..HMBL {
                 this.write_regs[it] = 0;
@@ -500,6 +507,8 @@ struct TIA {
                     }
                 }
 
+                // printf("FINAL p0pos: %d\n", this.player_pos[0]);
+
                 if current_pixel >= this.player_pos[0] && current_pixel < this.player_pos[0] + 8 {
                     var bit = 7 - (current_pixel - this.player_pos[0]);
 
@@ -571,6 +580,7 @@ var vsync_triggered = false;
 var single_step = false;
 
 func main(argc: int32, argv: **uint8) {
+
     if (argc < 2) {
         printf("Please provide a path to a ROM file to run!\n");
         return;
@@ -693,7 +703,7 @@ func main(argc: int32, argv: **uint8) {
                 var clks = 1;
                 if !waiting_for_wsync {
                     clks = cpu.step();
-                    
+
                     for 0..<clks {
                         pia.step();
                     }
