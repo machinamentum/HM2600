@@ -393,8 +393,6 @@ struct M6507 {
                  0xC5, 0xD5,       // Zero page ops
                  0xCD, 0xDD, 0xD9, // absolute ops
                  0xC1, 0xD1:       // indirect ops
-                var reg = op & CC_BITS;
-
                 var value: uint8;
                 // #immediate
                 if op == 0xC9 {
@@ -410,7 +408,7 @@ struct M6507 {
                     value = this.get_byte(result.address);
                 }
 
-                var final: uint16 = cast(uint16) this.regs[reg] + cast(uint16) (~value + 1);
+                var final: uint16 = cast(uint16) this.regs[REG_A] + cast(uint16) (~value + 1);
                 var flags = cast(uint8) (final & STATUS_SIGN);
                 if (final & 0xFF) == 0 flags |= STATUS_ZERO;
                 if (final & 0x100) flags |= STATUS_CARRY;
@@ -460,8 +458,6 @@ struct M6507 {
 
             // XOR
             case 0x49, 0x45, 0x55, 0x4D, 0x5D, 0x59, 0x41, 0x51:
-                var reg =op & CC_BITS;
-
                 var value: uint8;
                 // immediate mode == 010 if cc == 01
                 if (op & BBB_BITS) == (0b010 << 2) {
@@ -474,17 +470,15 @@ struct M6507 {
                     clks_ticked += result.clks_ticked;
                 }
 
-                this.regs[reg] ^= value;
+                this.regs[REG_A] ^= value;
 
-                var flags = this.regs[reg] & STATUS_SIGN;
-                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+                var flags = this.regs[REG_A] & STATUS_SIGN;
+                if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
 
                 this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
 
             // ADC
             case 0x69, 0x65, 0x75, 0x6D, 0x7D, 0x79, 0x61, 0x71:
-                var reg = op & CC_BITS;
-
                 var value: uint8;
                 // immediate mode == 010 if cc == 01
                 if (op & BBB_BITS) == (0b010 << 2) {
@@ -497,12 +491,12 @@ struct M6507 {
                     clks_ticked += result.clks_ticked;
                 }
 
-                var reg_value = this.regs[reg];
+                var reg_value = this.regs[REG_A];
                 var result = (cast(uint16) reg_value) + value + (this.P & STATUS_CARRY);
-                this.regs[reg] = cast(uint8) result;
+                this.regs[REG_A] = cast(uint8) result;
 
-                var flags = this.regs[reg] & STATUS_SIGN;
-                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+                var flags = this.regs[REG_A] & STATUS_SIGN;
+                if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
                 if result & 0x100      flags |= STATUS_CARRY;
 
                 // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
@@ -512,8 +506,6 @@ struct M6507 {
 
             // SBC
             case 0xE9, 0xE5, 0xF5, 0xED, 0xFD, 0xF9, 0xE1, 0xF1:
-                var reg = op & CC_BITS;
-
                 var value: uint8;
                 // immediate mode
                 if op == 0xE9 {
@@ -526,12 +518,12 @@ struct M6507 {
                     clks_ticked += result.clks_ticked;
                 }
 
-                var reg_value = this.regs[reg];
+                var reg_value = this.regs[REG_A];
                 var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) - 1 - value;
-                this.regs[reg] = cast(uint8) result;
+                this.regs[REG_A] = cast(uint8) result;
 
-                var flags = this.regs[reg] & STATUS_SIGN;
-                if this.regs[reg] == 0 flags |= STATUS_ZERO;
+                var flags = this.regs[REG_A] & STATUS_SIGN;
+                if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
                 if result & 0x100      flags |= STATUS_CARRY;
 
                 // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
@@ -541,12 +533,9 @@ struct M6507 {
 
             // Shift Right Logical (LSR)
             case 0x4A, 0x46, 0x56, 0x4E, 0x5E:
-                var reg = op & CC_BITS;
-
-                var value: uint8;
                 if op == 0x4A {
                     // LSR A
-                    var reg_value = this.regs[reg];
+                    var reg_value = this.regs[REG_A];
                     var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
 
                     this.regs[REG_A] = this.regs[REG_A] >> 1;
@@ -559,7 +548,7 @@ struct M6507 {
                 }  else {
                     // is is_for_load correct here?
                     var result = this.do_addressing(op, true);
-                    value = this.get_byte(result.address);
+                    var value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
                     var flags = value & STATUS_CARRY; // move bit 0 into carry flag
@@ -576,12 +565,9 @@ struct M6507 {
 
             // Shift Left Logical (ASL)
             case 0x0A, 0x06, 0x16, 0x0E, 0x1E:
-                var reg = op & CC_BITS;
-
-                var value: uint8;
                 if op == 0x0A {
                     // ASL A
-                    var reg_value = this.regs[reg];
+                    var reg_value = this.regs[REG_A];
                     var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
 
                     this.regs[REG_A] = this.regs[REG_A] << 1;
@@ -595,7 +581,7 @@ struct M6507 {
                 }  else {
                     // is is_for_load correct here?
                     var result = this.do_addressing(op, true);
-                    value = this.get_byte(result.address);
+                    var value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
                     var flags = (value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
@@ -613,12 +599,9 @@ struct M6507 {
 
             // ROL
             case 0x2A, 0x26, 0x36, 0x2E, 0x3E:
-                var reg = op & CC_BITS;
-
-                var value: uint8;
                 if op == 0x2A {
                     // ROL A
-                    var reg_value = this.regs[reg];
+                    var reg_value = this.regs[REG_A];
                     var carry = this.P & STATUS_CARRY;
                     var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
 
@@ -632,7 +615,7 @@ struct M6507 {
                 }  else {
                     // is is_for_load correct here?
                     var result = this.do_addressing(op, true);
-                    value = this.get_byte(result.address);
+                    var value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
                     var carry = this.P & STATUS_CARRY;
@@ -650,12 +633,10 @@ struct M6507 {
 
             // ROR
             case 0x6A, 0x66, 0x76, 0x6E, 0x7E:
-                var reg = op & CC_BITS;
-
                 var value: uint8;
                 if op == 0x6A {
                     // ROR A
-                    var reg_value = this.regs[reg];
+                    var reg_value = this.regs[REG_A];
                     var carry = (this.P & STATUS_CARRY) << 7;
                     var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
 
@@ -856,7 +837,7 @@ struct M6507 {
 
                 this.set_byte(result.address, value);
 
-            case 0x88, 0xCA: // DEC X, DEC Y
+            case 0x88, 0xCA: // DEC Y, DEC X
                 var reg = REG_X;
                 if op == 0x88 reg = REG_Y;
 

@@ -136,6 +136,8 @@ struct PIA {
 
         var this = cast(*PIA) entry.cbdata;
 
+        // if addr > 0x200 && addr != 0x284 printf("ADDR: %04X\n", addr);
+
         if A9 & addr {
             // PIA registers @TODO
 
@@ -148,6 +150,9 @@ struct PIA {
                     return (true, this.timer_value);
                 case TIM1T, TIM8T, TIM64T, TIM1024T:
                     return (true, this.timXt_regs[reg-TIM1T]);
+                case SWCHA:
+                    printf("SWCHA\n");
+                    return (true, 0xFF);
                 case SWCHB:
                     let RESET_BUTTON  = (1 << 0); // 0 = pressed @TODO
                     let SELECT_BUTTON = (1 << 1); // 0 = pressed @TODO
@@ -156,6 +161,8 @@ struct PIA {
 
                     return (true, (this.swbcnt & 0b110100) | COLOR_MODE | RESET_BUTTON | SELECT_BUTTON);
             }
+
+            printf("ADDR: %04X\n", reg);
 
             return (true, -1);
         } else {
@@ -185,7 +192,7 @@ struct PIA {
                 case TIM1T, TIM8T, TIM64T, TIM1024T:
                     this.timXt_regs[reg-TIM1T] = value;
 
-                    this.timer_value = value;
+                    this.timer_value = value-1;
                     this.timer_ticks = 0;
 
                     if reg == TIM1T {
@@ -211,11 +218,12 @@ struct PIA {
     }
 
     func step(this: *PIA) {
+        this.timer_ticks += 1;
+
         if (this.timer_ticks % this.timer_divider) == 0 {
             this.timer_value -= 1;
         }
 
-        this.timer_ticks += 1;
         if (this.timer_ticks >= this.timer_divider) this.timer_ticks -= this.timer_divider;
     }
 }
@@ -235,6 +243,9 @@ struct TIA {
     var missile_pos: [2] uint8;
     var ball_pos   : uint8;
 
+    // var resp0: uint8 = -1;
+    // var resp1: uint8 = -1;
+
     let WSYNC  = 0x02;
 
     let VSYNC  = 0x00;
@@ -247,6 +258,8 @@ struct TIA {
     let COLUPF = 0x08;
     let COLUBK = 0x09;
     let CTRLPF = 0x0A;
+    let REFP0  = 0x0B;
+    let REFP1  = 0x0C;
     let PF0    = 0x0D;
     let PF1    = 0x0E;
     let PF2    = 0x0F;
@@ -387,13 +400,13 @@ struct TIA {
             // printf("ASDASD p0pos: %d\n", this.player_pos[0]);
             // printf("DIFF: %d\n", cast(int32) (cast(int8) this.write_regs[HMP0] >> 4));
 
-            this.missile_pos[0] = (this.missile_pos[0] + cast(uint8) (cast(int8) this.write_regs[HMM0] >> 4)) % 160;
-            this.missile_pos[1] = (this.missile_pos[1] + cast(uint8) (cast(int8) this.write_regs[HMM1] >> 4)) % 160;
+            this.missile_pos[0] = (this.missile_pos[0] - cast(uint8) (cast(int8) this.write_regs[HMM0] >> 4)) % 160;
+            this.missile_pos[1] = (this.missile_pos[1] - cast(uint8) (cast(int8) this.write_regs[HMM1] >> 4)) % 160;
 
-            this.player_pos[0]  = (this.player_pos[0]  + cast(uint8) (cast(int8) this.write_regs[HMP0] >> 4)) % 160;
-            this.player_pos[1]  = (this.player_pos[1]  + cast(uint8) (cast(int8) this.write_regs[HMP1] >> 4)) % 160;
+            this.player_pos[0]  = (this.player_pos[0]  - cast(uint8) (cast(int8) this.write_regs[HMP0] >> 4)) % 160;
+            this.player_pos[1]  = (this.player_pos[1]  - cast(uint8) (cast(int8) this.write_regs[HMP1] >> 4)) % 160;
 
-            this.ball_pos       = (this.ball_pos       + cast(uint8) (cast(int8) this.write_regs[HMBL] >> 4)) % 160;
+            this.ball_pos       = (this.ball_pos       - cast(uint8) (cast(int8) this.write_regs[HMBL] >> 4)) % 160;
 
             // printf("HMM0: %d\n", cast(int32) (cast(int8) this.write_regs[HMM0] >> 4));
             // printf("HMM1: %d\n", cast(int32) (cast(int8) this.write_regs[HMM1] >> 4));
@@ -404,9 +417,12 @@ struct TIA {
             // printf("HMBL: %d\n", cast(int32) (cast(int8) this.write_regs[HMBL] >> 4));
 
             // printf("BNBNBNBNBN p0pos: %d\n", this.player_pos[0]);
-        } else if addr == RESP0 || addr == RESP1 {
-            this.player_pos[addr-RESP0] = this.current_pixel_clock - HBLANK_PIXELS;
-            if this.current_pixel_clock < HBLANK_PIXELS this.player_pos[addr-RESP0] = 3;
+        } else if addr == RESP0 {
+            this.player_pos[0] = this.current_pixel_clock - HBLANK_PIXELS;
+            if this.current_pixel_clock < HBLANK_PIXELS this.player_pos[0] = 3;
+        } else if addr == RESP1 {
+            this.player_pos[1] = this.current_pixel_clock - HBLANK_PIXELS;
+            if this.current_pixel_clock < HBLANK_PIXELS this.player_pos[1] = 3;
         } else if addr == RESM0 || addr == RESM1 {
             this.missile_pos[addr-RESM0] = this.current_pixel_clock - HBLANK_PIXELS;
             if this.current_pixel_clock < HBLANK_PIXELS this.missile_pos[addr-RESM0] = 2;
@@ -485,45 +501,80 @@ struct TIA {
             }
 
             {
-                if (this.write_regs[ENABL] & 0b10) != 0 && current_pixel == this.ball_pos {
-                    color = colupf;
-                }
+                if (this.write_regs[ENABL] & 0b10) != 0 && current_pixel >= this.ball_pos {
+                    var bits = (this.write_regs[CTRLPF] & 0b110000) >> 4;
+                    var size = (1 << bits);
 
-                if (this.write_regs[ENAM0] & 0b10) != 0 && current_pixel >= this.missile_pos[0] {
-                    var size = (this.write_regs[NUSIZ0] & 0b00110000) >> 4;
-                    size = (1 << size);
-
-                    if current_pixel < this.missile_pos[0] + size {
-                        color = colup0;
+                    if current_pixel < this.ball_pos+size {
+                        color = colupf;
                     }
                 }
 
-                if (this.write_regs[ENAM1] & 0b10) != 0 && current_pixel >= this.missile_pos[1] {
-                    var size = (this.write_regs[NUSIZ1] & 0b00110000) >> 4;
-                    size = (1 << size);
+                func do_missile(this: *TIA, current_pixel: uint8, index: uint8) -> bool {
+                    if (this.write_regs[ENAM0+index] & 0b10) != 0 && current_pixel >= this.missile_pos[index] {
+                        var size = (this.write_regs[NUSIZ0+index] & 0b00110000) >> 4;
+                        size = (1 << size);
 
-                    if current_pixel < this.missile_pos[1] + size {
-                        color = colup1;
+                        return current_pixel < this.missile_pos[index] + size;
                     }
+
+                    return false;
                 }
 
-                // printf("FINAL p0pos: %d\n", this.player_pos[0]);
+                if do_missile(this, current_pixel, 0) color = colup0;
+                if do_missile(this, current_pixel, 1) color = colup1;
 
-                if current_pixel >= this.player_pos[0] && current_pixel < this.player_pos[0] + 8 {
-                    var bit = 7 - (current_pixel - this.player_pos[0]);
+                func do_player(this: *TIA, current_pixel: uint8, index: uint8) -> bool {
+                    var shape = this.write_regs[NUSIZ0+index] & 0b111;
+                    var player_pos = this.player_pos[index];
 
-                    if this.write_regs[GRP0] & (1 << bit) {
-                        color = colup0;
+                    if current_pixel < player_pos return false;
+
+                    var reflect = (this.write_regs[REFP0+index] & 0b1000) != 0;
+
+
+                    if ((shape >= 0 && shape <= 4) || shape == 6) && current_pixel < player_pos + 8 {
+                        var bit = 7 - (current_pixel - this.player_pos[index]);
+                        if reflect bit = 7 - bit;
+                        return (this.write_regs[GRP0+index] & (1 << bit)) != 0;
                     }
+
+                    if (shape == 1 || shape == 3) && current_pixel >= player_pos + 16 && current_pixel < player_pos + 24 {
+                        var bit = 7 - ((current_pixel - 16) - this.player_pos[index]);
+                        if reflect bit = 7 - bit;
+                        return (this.write_regs[GRP0+index] & (1 << bit)) != 0;
+                    }
+
+                    if (shape == 2 || shape == 3 || shape == 6) && current_pixel >= player_pos + 32 && current_pixel < player_pos + 40 {
+                        var bit = 7 - ((current_pixel - 32) - this.player_pos[index]);
+                        if reflect bit = 7 - bit;
+                        return (this.write_regs[GRP0+index] & (1 << bit)) != 0;
+                    }
+
+                    if (shape == 4 || shape == 6) && current_pixel >= player_pos + 64 && current_pixel < player_pos + 72 {
+                        var bit = 7 - ((current_pixel - 64) - this.player_pos[index]);
+                        if reflect bit = 7 - bit;
+                        return (this.write_regs[GRP0+index] & (1 << bit)) != 0;
+                    }
+
+                    if shape == 5 && current_pixel < player_pos + 16 {
+                        var bit = 7 - ((current_pixel - this.player_pos[index]) / 2);
+                        if reflect bit = 7 - bit;
+                        return (this.write_regs[GRP0+index] & (1 << bit)) != 0;
+                    }
+
+                    if shape == 7 && current_pixel < player_pos + 32 {
+                        var bit = 7 - ((current_pixel - this.player_pos[index]) / 4);
+                        if reflect bit = 7 - bit;
+                        return (this.write_regs[GRP0+index] & (1 << bit)) != 0;
+                    }
+
+                    return false;
                 }
 
-                if current_pixel >= this.player_pos[1] && current_pixel < this.player_pos[1] + 8 {
-                    var bit = 7 - (current_pixel - this.player_pos[1]);
-
-                    if this.write_regs[GRP1] & (1 << bit) {
-                        color = colup1;
-                    }
-                }
+                if do_player(this, current_pixel, 0) color = colup0;
+                if do_player(this, current_pixel, 1) color = colup1;
+                
             }
         }
 
@@ -687,12 +738,18 @@ func main(argc: int32, argv: **uint8) {
         if step_cpu {
             if single_step step_cpu = false;
             while !vsync_triggered {
+                var steps = 0;
                 while waiting_for_wsync {
                     tia.step();
+                    steps += 1;
+                }
+
+                for 0..steps / 3 {
+                    pia.step();
                 }
 
                 var clks_needed = cpu.do_dry_run();
-                if waiting_for_wsync clks_needed = 1;
+                assert(!waiting_for_wsync, "!waiting_for_wsync");
 
                 for 0..<clks_needed {
                     tia.step();
@@ -700,13 +757,10 @@ func main(argc: int32, argv: **uint8) {
                     tia.step();
                 }
 
-                var clks = 1;
-                if !waiting_for_wsync {
-                    clks = cpu.step();
+                var clks = cpu.step();
 
-                    for 0..<clks {
-                        pia.step();
-                    }
+                for 0..<clks {
+                    pia.step();
                 }
 
                 if clks == 0 {
