@@ -151,7 +151,7 @@ struct PIA {
                 case TIM1T, TIM8T, TIM64T, TIM1024T:
                     return (true, this.timXt_regs[reg-TIM1T]);
                 case SWCHA:
-                    printf("SWCHA\n");
+                    // printf("SWCHA\n");
                     return (true, 0xFF);
                 case SWCHB:
                     let RESET_BUTTON  = (1 << 0); // 0 = pressed @TODO
@@ -192,7 +192,7 @@ struct PIA {
                 case TIM1T, TIM8T, TIM64T, TIM1024T:
                     this.timXt_regs[reg-TIM1T] = value;
 
-                    this.timer_value = value-1;
+                    this.timer_value = value;
                     this.timer_ticks = 0;
 
                     if reg == TIM1T {
@@ -218,12 +218,11 @@ struct PIA {
     }
 
     func step(this: *PIA) {
-        this.timer_ticks += 1;
-
         if (this.timer_ticks % this.timer_divider) == 0 {
             this.timer_value -= 1;
         }
 
+        this.timer_ticks += 1;
         if (this.timer_ticks >= this.timer_divider) this.timer_ticks -= this.timer_divider;
     }
 }
@@ -281,6 +280,9 @@ struct TIA {
     let HMM0   = 0x22;
     let HMM1   = 0x23;
     let HMBL   = 0x24;
+
+    let RESMP0 = 0x28;
+    let RESMP1 = 0x29;
 
     let HMOVE  = 0x2A;
     let HMCLR  = 0x2B;
@@ -352,6 +354,7 @@ struct TIA {
                 return (true, 0);
             }
         }
+
         if addr == INPT0 {
 
         } else if addr == INPT1 {
@@ -361,10 +364,10 @@ struct TIA {
         } else if addr == INPT3 {
 
         } else if addr == INPT4 {
-            printf("INPT4\n");
-            return (true, 1 << 7); // @Incomplete
+            // printf("INPT4\n");
+            return (true, 0xFF); // @Incomplete
         } else if addr == INPT5 {
-            return (true, 1 << 7); // @Incomplete
+            return (true, 0xFF); // @Incomplete
         }
 
         // @Incomplete
@@ -400,13 +403,30 @@ struct TIA {
             // printf("ASDASD p0pos: %d\n", this.player_pos[0]);
             // printf("DIFF: %d\n", cast(int32) (cast(int8) this.write_regs[HMP0] >> 4));
 
-            this.missile_pos[0] = (this.missile_pos[0] - cast(uint8) (cast(int8) this.write_regs[HMM0] >> 4)) % 160;
-            this.missile_pos[1] = (this.missile_pos[1] - cast(uint8) (cast(int8) this.write_regs[HMM1] >> 4)) % 160;
+            var missile_pos0 = (cast(int16) cast(uint16) this.missile_pos[0] - (cast(int16) (cast(int8) this.write_regs[HMM0] >> 4))) % 160;
+            if missile_pos0 < 0 missile_pos0 += 160;
+            var missile_pos1 = (cast(int16) cast(uint16) this.missile_pos[1] - (cast(int16) (cast(int8) this.write_regs[HMM1] >> 4))) % 160;
+            if missile_pos1 < 0 missile_pos1 += 160;
 
-            this.player_pos[0]  = (this.player_pos[0]  - cast(uint8) (cast(int8) this.write_regs[HMP0] >> 4)) % 160;
-            this.player_pos[1]  = (this.player_pos[1]  - cast(uint8) (cast(int8) this.write_regs[HMP1] >> 4)) % 160;
+            var player_pos0  = (cast(int16) cast(uint16) this.player_pos[0]  - (cast(int16) (cast(int8) this.write_regs[HMP0] >> 4))) % 160;
+            if player_pos0 < 0 player_pos0 += 160;
+            var player_pos1  = (cast(int16) cast(uint16) this.player_pos[1]  - (cast(int16) (cast(int8) this.write_regs[HMP1] >> 4))) % 160;
+            if player_pos1 < 0 player_pos1 += 160;
 
-            this.ball_pos       = (this.ball_pos       - cast(uint8) (cast(int8) this.write_regs[HMBL] >> 4)) % 160;
+            var ball_pos     = (cast(int16) cast(uint16) this.ball_pos       - (cast(int16) (cast(int8) this.write_regs[HMBL] >> 4))) % 160;
+            if ball_pos < 0 ball_pos += 160;
+
+            assert(missile_pos0 >= 0 && missile_pos0 < 160);
+            assert(missile_pos1 >= 0 && missile_pos1 < 160);
+            assert(player_pos0 >= 0 && player_pos0 < 160);
+            assert(player_pos1 >= 0 && player_pos1 < 160);
+            assert(ball_pos >= 0 && ball_pos < 160);
+
+            this.missile_pos[0] = cast(uint8) missile_pos0;
+            this.missile_pos[1] = cast(uint8) missile_pos1;
+            this.player_pos[0] = cast(uint8) player_pos0;
+            this.player_pos[1] = cast(uint8) player_pos1;
+            this.ball_pos = cast(uint8) ball_pos;
 
             // printf("HMM0: %d\n", cast(int32) (cast(int8) this.write_regs[HMM0] >> 4));
             // printf("HMM1: %d\n", cast(int32) (cast(int8) this.write_regs[HMM1] >> 4));
@@ -435,6 +455,18 @@ struct TIA {
             for HMP0..HMBL {
                 this.write_regs[it] = 0;
             }
+        } else if addr == RESMP0 {
+            var shape = this.write_regs[NUSIZ0] & 0b111;
+            this.missile_pos[0] = this.player_pos[0] + 3;
+
+            if shape == 5 this.missile_pos[0] += 3;
+            if shape == 7 this.missile_pos[0] += 7;
+        } else if addr == RESMP1 {
+            var shape = this.write_regs[NUSIZ1] & 0b111;
+            this.missile_pos[1] = this.player_pos[1] + 3;
+
+            if shape == 5 this.missile_pos[1] += 3;
+            if shape == 7 this.missile_pos[1] += 7;
         }
 
         this.write_regs[addr] = value;
@@ -511,6 +543,8 @@ struct TIA {
                 }
 
                 func do_missile(this: *TIA, current_pixel: uint8, index: uint8) -> bool {
+                    if this.write_regs[RESMP0+index] & 0b10 return false;
+
                     if (this.write_regs[ENAM0+index] & 0b10) != 0 && current_pixel >= this.missile_pos[index] {
                         var size = (this.write_regs[NUSIZ0+index] & 0b00110000) >> 4;
                         size = (1 << size);
@@ -520,9 +554,6 @@ struct TIA {
 
                     return false;
                 }
-
-                if do_missile(this, current_pixel, 0) color = colup0;
-                if do_missile(this, current_pixel, 1) color = colup1;
 
                 func do_player(this: *TIA, current_pixel: uint8, index: uint8) -> bool {
                     var shape = this.write_regs[NUSIZ0+index] & 0b111;
@@ -571,10 +602,12 @@ struct TIA {
 
                     return false;
                 }
-
-                if do_player(this, current_pixel, 0) color = colup0;
-                if do_player(this, current_pixel, 1) color = colup1;
                 
+                if do_missile(this, current_pixel, 1) color = colup1;
+                if do_player(this, current_pixel, 1) color = colup1;
+
+                if do_missile(this, current_pixel, 0) color = colup0;
+                if do_player(this, current_pixel, 0) color = colup0;
             }
         }
 
@@ -694,7 +727,7 @@ func main(argc: int32, argv: **uint8) {
     cpu.memory.mappings.add(pia_map);
 
     for *pia.ram {
-        <<it = 0xFF;
+        <<it = 0x00;
     }
 
     var tia: TIA;
@@ -741,11 +774,10 @@ func main(argc: int32, argv: **uint8) {
                 var steps = 0;
                 while waiting_for_wsync {
                     tia.step();
+                    // if steps % 3 == 0 {
+                    //     pia.step();
+                    // }
                     steps += 1;
-                }
-
-                for 0..steps / 3 {
-                    pia.step();
                 }
 
                 var clks_needed = cpu.do_dry_run();
@@ -755,12 +787,22 @@ func main(argc: int32, argv: **uint8) {
                     tia.step();
                     tia.step();
                     tia.step();
+
+                    // pia.step();
                 }
 
                 var clks = cpu.step();
 
+                if cpu.PC == 0xF886 {
+                    // single_step = true;
+                }
+
                 for 0..<clks {
                     pia.step();
+
+                    // tia.step();
+                    // tia.step();
+                    // tia.step();
                 }
 
                 if clks == 0 {
@@ -798,7 +840,7 @@ func main(argc: int32, argv: **uint8) {
 
         let scale = 3;
         var playfield_width: float = pixels_per_scanline * scale;
-        var playfield_height: float = scanlines * scale;
+        var playfield_height: float = scanlines * scale / 2;
         {
             var x: float = 0;
             var y: float = 0;
@@ -892,6 +934,11 @@ func main(argc: int32, argv: **uint8) {
 
         snprintf(buf.data, buf.count, "BALL POS: %d", tia.ball_pos);
         my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
+
+        snprintf(buf.data, buf.count, "P0 POS: %d", tia.player_pos[0]);
+        my_stbtt_print(playfield_width, y_offset + text_height*8, to_string(buf.data));
+        snprintf(buf.data, buf.count, "P1 POS: %d", tia.player_pos[1]);
+        my_stbtt_print(playfield_width, y_offset + text_height*9, to_string(buf.data));
 
         // snprintf(buf.data, buf.count, "COMBAT SCANLINE: %02X", cpu.get_byte(0xB4));
         // my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));

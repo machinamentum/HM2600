@@ -519,7 +519,7 @@ struct M6507 {
                 }
 
                 var reg_value = this.regs[REG_A];
-                var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) - 1 - value;
+                var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) + (0xFF - value) + 1;
                 this.regs[REG_A] = cast(uint8) result;
 
                 var flags = this.regs[REG_A] & STATUS_SIGN;
@@ -638,7 +638,7 @@ struct M6507 {
                     // ROR A
                     var reg_value = this.regs[REG_A];
                     var carry = (this.P & STATUS_CARRY) << 7;
-                    var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
+                    var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
 
                     this.regs[REG_A] = ((this.regs[REG_A] >> 1) & 0x7F) | carry;
 
@@ -654,7 +654,7 @@ struct M6507 {
                     clks_ticked += result.clks_ticked + 2;
 
                     var carry = (this.P & STATUS_CARRY) << 7;
-                    var flags = (value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
+                    var flags = value & STATUS_CARRY; // move bit 0 into carry flag
 
                     value = ((value >> 1) & 0x7F) | carry;
 
@@ -885,7 +885,37 @@ struct M6507 {
             case 0x28: // POP P
                 this.P = this.stack_pop_byte() | STATUS_BREAK | STATUS_UNUSED;
                 clks_ticked += 4;
-        
+
+            case 0x40: // RETI
+                var flags = this.stack_pop_byte();
+
+                // cannot modify break and unused flags.
+                this.set_flags(STATUS_ZERO | STATUS_SIGN | STATUS_CARRY | STATUS_OVERFLOW | STATUS_DEC | STATUS_IRQ, flags);
+
+                this.PC = this.stack_pop_word();
+                clks_ticked += 6;
+            case 0x00: // BRK
+                this.stack_push_word(this.PC+1);
+                this.set_flags(STATUS_BREAK, STATUS_BREAK);
+                this.stack_push_byte(this.P);
+                this.set_flags(STATUS_IRQ, STATUS_IRQ);
+                this.PC = this.get_word(0xFFFE);
+                clks_ticked += 7;
+
+            // Illegal opcodes but used by some software
+            case 0xA7, 0xB7, 0xAF, 0xA3, 0xB3: // LAX
+                var result = this.do_addressing(op, true);
+                clks_ticked += result.clks_ticked;
+
+                var value = this.get_byte(result.address);
+
+                this.regs[REG_A] = value;
+                this.regs[REG_X] = value;
+
+                var flags = value & STATUS_SIGN;
+                if value == 0 flags |= STATUS_ZERO;
+
+                this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
         }
 
         if clks_ticked == 0 {
