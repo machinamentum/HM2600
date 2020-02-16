@@ -541,16 +541,15 @@ struct M6507 {
                 var reg_value = this.regs[REG_A];
 
                 if this.P & STATUS_DEC {
-                    var flags: uint8;
+                    var flags: uint8 = STATUS_CARRY;
 
-                    var result = reg_value - value - (this.P & STATUS_CARRY) - 1;
+                    var result = reg_value + ((this.P & STATUS_CARRY) - 1) - value;
                     if (result & 0xF0) > 0x90 {
                         result -= 0x60;
-                        // result -= 0x01;
+                        flags &= ~STATUS_CARRY;
                     }
                     if (result & 0x0F) > 0x09 {
                         result -= 0x06;
-                        flags |= STATUS_CARRY;
                     }
                     this.regs[REG_A] = result;
 

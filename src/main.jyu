@@ -1074,7 +1074,7 @@ func main(argc: int32, argv: **uint8) {
 
                 var clks = cpu.step();
 
-                if cpu.PC == 0xF479 {
+                if cpu.PC == 0xF71F {
                     // single_step = true;
                 }
 
