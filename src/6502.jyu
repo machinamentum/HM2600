@@ -558,7 +558,7 @@ struct M6507 {
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
                     
                 } else {
-                    var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) + (0xFF - value) + 1;
+                    var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) - 1 + (0xFF - value) + 1;
                     this.regs[REG_A] = cast(uint8) result;
 
                     var flags = this.regs[REG_A] & STATUS_SIGN;
