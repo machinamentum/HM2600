@@ -357,7 +357,7 @@ struct M6507 {
 
         switch op {
             case 0xA8:
-                clks_ticked += do_reg2reg_mov(this, REG_Y, REG_X, STATUS_SIGN | STATUS_ZERO);
+                clks_ticked += do_reg2reg_mov(this, REG_Y, REG_A, STATUS_SIGN | STATUS_ZERO);
             case 0xAA:
                 clks_ticked += do_reg2reg_mov(this, REG_X, REG_A, STATUS_SIGN | STATUS_ZERO);
             case 0xBA:
@@ -492,17 +492,37 @@ struct M6507 {
                 }
 
                 var reg_value = this.regs[REG_A];
-                var result = (cast(uint16) reg_value) + value + (this.P & STATUS_CARRY);
-                this.regs[REG_A] = cast(uint8) result;
 
-                var flags = this.regs[REG_A] & STATUS_SIGN;
-                if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
-                if result & 0x100      flags |= STATUS_CARRY;
+                if this.P & STATUS_DEC {
+                    var flags: uint8;
 
-                // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
-                if ((reg_value^result) & (value^result) & 0x80) flags |= STATUS_OVERFLOW;
+                    var result = reg_value + value + (this.P & STATUS_CARRY);
 
-                this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
+                    if (result & 0x0F) > 0x09 result += 0x06;
+                    if (result & 0xF0) > 0x90 {
+                        result += 0x60;
+                        flags |= STATUS_CARRY;
+                    }
+                    this.regs[REG_A] = result;
+
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    // State of sign, overflow is "undocumented" on 6502/6507, though it is documented
+                    // for other 6502 variants and the results are the same across all models.
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
+                } else {
+                    var result = (cast(uint16) reg_value) + value + (this.P & STATUS_CARRY);
+                    this.regs[REG_A] = cast(uint8) result;
+
+                    var flags = this.regs[REG_A] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    if result & 0x100      flags |= STATUS_CARRY;
+
+                    // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
+                    if ((reg_value^result) & (value^result) & 0x80) flags |= STATUS_OVERFLOW;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
+                }
 
             // SBC
             case 0xE9, 0xE5, 0xF5, 0xED, 0xFD, 0xF9, 0xE1, 0xF1:
@@ -519,17 +539,38 @@ struct M6507 {
                 }
 
                 var reg_value = this.regs[REG_A];
-                var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) + (0xFF - value) + 1;
-                this.regs[REG_A] = cast(uint8) result;
 
-                var flags = this.regs[REG_A] & STATUS_SIGN;
-                if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
-                if result & 0x100      flags |= STATUS_CARRY;
+                if this.P & STATUS_DEC {
+                    var flags: uint8;
 
-                // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
-                if ((reg_value^result) & (value^result) & 0x80) flags |= STATUS_OVERFLOW;
+                    var result = reg_value - value - (this.P & STATUS_CARRY) - 1;
+                    if (result & 0xF0) > 0x90 {
+                        result -= 0x60;
+                        // result -= 0x01;
+                    }
+                    if (result & 0x0F) > 0x09 {
+                        result -= 0x06;
+                        flags |= STATUS_CARRY;
+                    }
+                    this.regs[REG_A] = result;
 
-                this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
+                    
+                } else {
+                    var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) + (0xFF - value) + 1;
+                    this.regs[REG_A] = cast(uint8) result;
+
+                    var flags = this.regs[REG_A] & STATUS_SIGN;
+                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    if result & 0x100      flags |= STATUS_CARRY;
+
+                    // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
+                    if ((reg_value^result) & (value^result) & 0x80) flags |= STATUS_OVERFLOW;
+
+                    this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
+                }
 
             // Shift Right Logical (LSR)
             case 0x4A, 0x46, 0x56, 0x4E, 0x5E:
