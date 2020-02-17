@@ -242,8 +242,8 @@ struct PIA {
                 this.timer_value -= 1;
 
                 if this.timer_value == 0xFF {
-                    // this.timer_did_underflow = true;
-                    // this.instat = 0b11000000;
+                    this.timer_did_underflow = true;
+                    this.instat = 0b11000000;
                 }
             }
         }
@@ -590,13 +590,13 @@ struct TIA {
                 this.hmove_in_hblank = 8;
             }
         } else if addr == RESP0 || addr == RESP1 {
-            this.player_pos[addr-RESP0] = (this.current_pixel_clock - HBLANK_PIXELS) + 5;
+            this.player_pos[addr-RESP0] = (this.current_pixel_clock - HBLANK_PIXELS) + 5; // @Hack I chose these numbers based on what I was seeing in various games. I do not know why the sprites are off by these amounts, it could be a timing issue or we are missing CPU clocks or something.
             if this.current_pixel_clock < HBLANK_PIXELS this.player_pos[addr-RESP0] = 0;
         } else if addr == RESM0 || addr == RESM1 {
-            this.missile_pos[addr-RESM0] = (this.current_pixel_clock - HBLANK_PIXELS) + 5;
+            this.missile_pos[addr-RESM0] = (this.current_pixel_clock - HBLANK_PIXELS) + 5; // @Hack I chose these numbers based on what I was seeing in various games. I do not know why the sprites are off by these amounts, it could be a timing issue or we are missing CPU clocks or something.
             if this.current_pixel_clock < HBLANK_PIXELS this.missile_pos[addr-RESM0] = 0;
         } else if addr == RESBL {
-            this.ball_pos = (this.current_pixel_clock - HBLANK_PIXELS) + 4;
+            this.ball_pos = (this.current_pixel_clock - HBLANK_PIXELS) + 4; // @Hack I chose these numbers based on what I was seeing in various games. I do not know why the sprites are off by these amounts, it could be a timing issue or we are missing CPU clocks or something.
             if this.current_pixel_clock < HBLANK_PIXELS this.ball_pos = HBLANK_PIXELS + 0;
         } else if addr == HMCLR {
             for HMP0..HMBL {
@@ -878,6 +878,14 @@ func key_callback(window: *GLFWwindow, key: int32, scancode: int32, action: int3
         step_cpu = true;
     }
 
+    if key == GLFW_KEY_GRAVE_ACCENT && (action == 1 || action == 2) {
+        show_debugging_stuff = !show_debugging_stuff;
+    }
+
+    if key == GLFW_KEY_F1 && (action == 1 || action == 2) {
+        do_reset = true;
+    }
+
     var held = (action == 1 || action == 2);
 
     if key == GLFW_KEY_SPACE {
@@ -930,6 +938,8 @@ var waiting_for_wsync = false;
 var vsync_triggered = false;
 var single_step = false;
 var num_steps = 1;
+var show_debugging_stuff = false;
+var do_reset = true;
 
 func main(argc: int32, argv: **uint8) {
 
@@ -937,7 +947,24 @@ func main(argc: int32, argv: **uint8) {
         printf("Please provide a path to a ROM file to run!\n");
         return;
     }
-    var rom_image = read_entire_file(to_string(argv[1]));
+
+    for 2..<argc {
+        if to_string(argv[it]) == "debug" {
+            show_debugging_stuff = true;
+        }
+    }
+
+    var result = read_entire_file(to_string(argv[1]));
+    if !result.success {
+        printf("Could not open file: %s\n", argv[1]);
+        return;
+    }
+
+    var rom_image = result.result;
+    if rom_image.length == 0 || (rom_image.length % 2048) != 0 {
+        printf("Invalid or corrupt ROM image. Size %d\n", rom_image.length);
+        return;
+    }
 
     if true {
         var exe_path = get_executable_path();
@@ -1009,9 +1036,6 @@ func main(argc: int32, argv: **uint8) {
 
     cpu.memory.mappings.add(tia_map);
 
-    var entry_point = cpu.get_word(0xFFFC);
-    cpu.PC = entry_point;
-
     var scanlines = TIA.TOTAL_SCANLINES; // NTSC, PAL is 312
     var pixels_per_scanline = TIA.PIXELS_PER_SCANLINE;
     var framebuffer = cast(*uint32) malloc(cast() (scanlines * pixels_per_scanline * sizeof(uint32)));
@@ -1032,9 +1056,21 @@ func main(argc: int32, argv: **uint8) {
     step_cpu = true;
     var step_count = 0;
 
+    var clocks_ticked: int64 = 0;
+
     while !glfwWindowShouldClose(window) {
         glClear(GL_COLOR_BUFFER_BIT);
         glClearColor(0.2, 0.2, 0.2, 1);
+
+        if do_reset {
+            var entry_point = cpu.get_word(0xFFFC);
+            tia.current_pixel_clock = 0;
+            tia.current_scanline = 0;
+
+            cpu.PC = entry_point;
+            clocks_ticked = 0;
+            do_reset = false;
+        }
 
         // step_cpu = true;
         if step_cpu {
@@ -1043,11 +1079,23 @@ func main(argc: int32, argv: **uint8) {
                 var steps = 0;
                 while waiting_for_wsync {
                     tia.step();
-                    // if steps % 3 == 0 {
-                    //     pia.step();
-                    // }
                     steps += 1;
                 }
+
+                var steps_mod_3 = steps % 3;
+                if steps_mod_3 {
+                    steps += 3-steps_mod_3;
+                    for 0..<3-steps_mod_3 {
+                        tia.step();
+                    }
+                }
+
+                for 0..<steps/3 {
+                    pia.step();
+                }
+
+                clocks_ticked += steps/3;
+
 
                 var clks_needed = cpu.do_dry_run();
                 assert(!waiting_for_wsync, "!waiting_for_wsync");
@@ -1074,6 +1122,8 @@ func main(argc: int32, argv: **uint8) {
                     // tia.step();
                 }
 
+                clocks_ticked += clks;
+
                 if clks == 0 {
                     step_cpu = false;
                     break;
@@ -1095,18 +1145,23 @@ func main(argc: int32, argv: **uint8) {
         var width: int32;
         var height: int32;
         glfwGetWindowSize(window, *width, *height);
+        var aspect: float = cast(float) width / height;
 
         var xscale: float = 1;
         var yscale: float = 1;
 
         // @TODO I am not sure what is the best thing to do on Windows/Linux
         // Using this on Windows seems to mess up rendering in that nothing gets drawn..
-        #if os(MacOSX) {
+        #if true {
             glfwGetWindowContentScale(window, *xscale, *yscale);
         }
 
-        glViewport(0, 0, cast(GLsizei) (width * xscale), cast(GLsizei) (height * yscale));
-        glOrtho(0, width, height, 0, -1, 1);
+        #if os(MacOSX) {
+            glViewport(0, 0, cast(GLsizei) (width * xscale), cast(GLsizei) (height * yscale));
+        } else {
+            glViewport(0, 0, cast(GLsizei) (width), cast(GLsizei) (height));
+        }
+        glOrtho(0, width/xscale, height/xscale, 0, -1, 1);
 
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, fb_tex);
@@ -1114,10 +1169,21 @@ func main(argc: int32, argv: **uint8) {
 
         let scale = 3;
         var playfield_width: float = pixels_per_scanline * scale;
-        var playfield_height: float = scanlines * scale / 2;
+        var playfield_height: float = scanlines * scale;
+
+        if !show_debugging_stuff {
+            playfield_width = (width / xscale);
+            playfield_height = (height) * (1.0/aspect);
+        }
+
         {
             var x: float = 0;
             var y: float = 0;
+
+            if !show_debugging_stuff {
+                y = -70; // 30 overscan, 37 vblank, 3 vsync 
+            }
+
             var width = playfield_width;
             var height = playfield_height;
 
@@ -1138,94 +1204,96 @@ func main(argc: int32, argv: **uint8) {
             glEnd();
         }
 
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glEnable(GL_TEXTURE_2D);
+        if show_debugging_stuff {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glEnable(GL_TEXTURE_2D);
 
-        var text_height: float = 32;
-        var y_offset: float;
-        var x_offset: float;
+            var text_height: float = 32;
+            var y_offset: float;
+            var x_offset: float;
 
-        my_stbtt_print(playfield_width, y_offset + text_height*1, "  0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F");
-        y_offset += text_height;
+            my_stbtt_print(playfield_width, y_offset + text_height*1, "  0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F");
+            y_offset += text_height;
 
-        for pia.ram {
-            if (it_index % 16) == 0 && it_index != 0 {
-                x_offset = 0;
-                y_offset += 32;
+            for pia.ram {
+                if (it_index % 16) == 0 && it_index != 0 {
+                    x_offset = 0;
+                    y_offset += 32;
+                }
+
+                if (it_index % 16) == 0 {
+                    var buf: [32] uint8;
+                    snprintf(buf.data, buf.count, "%X ", (it_index / 16) + 8);
+                    x_offset += my_stbtt_print(playfield_width + x_offset, y_offset + text_height, to_string(buf.data));
+                }
+
+                var buf: [4] uint8;
+                snprintf(buf.data, cast() buf.count, "%02X ", it);
+                var width = my_stbtt_print(playfield_width + x_offset, y_offset + text_height, to_string(buf.data));
+                x_offset += width;
             }
 
-            if (it_index % 16) == 0 {
-                var buf: [32] uint8;
-                snprintf(buf.data, buf.count, "%X ", (it_index / 16) + 8);
-                x_offset += my_stbtt_print(playfield_width + x_offset, y_offset + text_height, to_string(buf.data));
-            }
+            y_offset += text_height;
 
-            var buf: [4] uint8;
-            snprintf(buf.data, cast() buf.count, "%02X ", it);
-            var width = my_stbtt_print(playfield_width + x_offset, y_offset + text_height, to_string(buf.data));
-            x_offset += width;
+            var buf: [32] uint8;
+            snprintf(buf.data, buf.count, "X: %02X", cpu.regs[M6507.REG_X]);
+            my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
+
+
+            snprintf(buf.data, buf.count, "Y: %02X", cpu.regs[M6507.REG_Y]);
+            my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "A: %02X", cpu.regs[M6507.REG_A]);
+            my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "S: %02X", cpu.regs[M6507.REG_S]);
+            my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "P: %02X", cpu.P);
+            my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "PC: %04X", cpu.PC);
+            my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
+
+            y_offset += text_height*6;
+
+            snprintf(buf.data, buf.count, "PF0: %02X", tia.write_regs[TIA.PF0]);
+            my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
+            snprintf(buf.data, buf.count, "PF1: %02X", tia.write_regs[TIA.PF1]);
+            my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
+            snprintf(buf.data, buf.count, "PF2: %02X", tia.write_regs[TIA.PF2]);
+            my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "COLUPF: %02X", tia.write_regs[TIA.COLUPF]);
+            my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
+            snprintf(buf.data, buf.count, "COLUBK: %02X", tia.write_regs[TIA.COLUBK]);
+            my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
+
+            // snprintf(buf.data, buf.count, "CTRLPF: %02X", tia.write_regs[TIA.CTRLPF]);
+            // my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "BALL POS: %d", tia.ball_pos);
+            my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "P0 POS: %d", tia.player_pos[0]);
+            my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
+            snprintf(buf.data, buf.count, "P1 POS: %d", tia.player_pos[1]);
+            my_stbtt_print(playfield_width, y_offset + text_height*8, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "GRP0: %d", tia.write_regs[TIA.GRP0]);
+            my_stbtt_print(playfield_width, y_offset + text_height*9, to_string(buf.data));
+            snprintf(buf.data, buf.count, "GRP1: %d", tia.write_regs[TIA.GRP1]);
+            my_stbtt_print(playfield_width, y_offset + text_height*10, to_string(buf.data));
+
+            snprintf(buf.data, buf.count, "clocks ticked: %lld", clocks_ticked);
+            my_stbtt_print(playfield_width, y_offset + text_height*11, to_string(buf.data));
+
+            // snprintf(buf.data, buf.count, "COMBAT SCANLINE: %02X", cpu.get_byte(0xB4));
+            // my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
+
+            glDisable(GL_BLEND);
         }
-
-        y_offset += text_height;
-
-        var buf: [32] uint8;
-        snprintf(buf.data, buf.count, "X: %02X", cpu.regs[M6507.REG_X]);
-        my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
-
-
-        snprintf(buf.data, buf.count, "Y: %02X", cpu.regs[M6507.REG_Y]);
-        my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "A: %02X", cpu.regs[M6507.REG_A]);
-        my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "S: %02X", cpu.regs[M6507.REG_S]);
-        my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "P: %02X", cpu.P);
-        my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "PC: %04X", cpu.PC);
-        my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
-
-        y_offset += text_height*6;
-
-        snprintf(buf.data, buf.count, "PF0: %02X", tia.write_regs[TIA.PF0]);
-        my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
-        snprintf(buf.data, buf.count, "PF1: %02X", tia.write_regs[TIA.PF1]);
-        my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
-        snprintf(buf.data, buf.count, "PF2: %02X", tia.write_regs[TIA.PF2]);
-        my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "COLUPF: %02X", tia.write_regs[TIA.COLUPF]);
-        my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
-        snprintf(buf.data, buf.count, "COLUBK: %02X", tia.write_regs[TIA.COLUBK]);
-        my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
-
-        // snprintf(buf.data, buf.count, "CTRLPF: %02X", tia.write_regs[TIA.CTRLPF]);
-        // my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "BALL POS: %d", tia.ball_pos);
-        my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "P0 POS: %d", tia.player_pos[0]);
-        my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
-        snprintf(buf.data, buf.count, "P1 POS: %d", tia.player_pos[1]);
-        my_stbtt_print(playfield_width, y_offset + text_height*8, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "GRP0: %d", tia.write_regs[TIA.GRP0]);
-        my_stbtt_print(playfield_width, y_offset + text_height*9, to_string(buf.data));
-        snprintf(buf.data, buf.count, "GRP1: %d", tia.write_regs[TIA.GRP1]);
-        my_stbtt_print(playfield_width, y_offset + text_height*10, to_string(buf.data));
-
-        snprintf(buf.data, buf.count, "posLeftBranch: %d", pia.ram[0x9B-0x80]);
-        my_stbtt_print(playfield_width, y_offset + text_height*11, to_string(buf.data));
-
-        // snprintf(buf.data, buf.count, "COMBAT SCANLINE: %02X", cpu.get_byte(0xB4));
-        // my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
-
-        glDisable(GL_BLEND);
 
         glfwPollEvents();
         glfwSwapBuffers(window);

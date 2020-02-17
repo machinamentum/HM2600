@@ -829,7 +829,7 @@ struct M6507 {
                 var nnnn = this.get_word(this.PC);
                 this.PC = this.get_word(absolute(this, nnnn));
                 clks_ticked += 5;
-            case 0x20:
+            case 0x20: // JSR/CALL
                 var nnnn = this.get_word(this.PC);
                 this.stack_push_word(this.PC+1);
                 // Do we need to inc/dec the stack pointer here?
@@ -837,7 +837,7 @@ struct M6507 {
                 this.PC = nnnn;
                 clks_ticked += 6;
 
-            case 0x60:
+            case 0x60: // RTS
                 this.PC = this.stack_pop_word()+1;
                 // printf("NEW PC: %04X\n", this.PC);
                 clks_ticked += 6;
