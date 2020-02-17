@@ -124,8 +124,8 @@ struct M6507 {
     func zero_page(this: *M6507, offset: uint8, register: uint8 = NO_OFFSET) -> uint16 {
         var reg: uint8;
         
-        if (register == X_OFFSET) reg = this.regs[REG_X];
-        else if (register == Y_OFFSET) reg = this.regs[REG_Y];
+        if      register == X_OFFSET reg = this.regs[REG_X];
+        else if register == Y_OFFSET reg = this.regs[REG_Y];
 
         return absolute(this, offset + reg);
     }
@@ -145,7 +145,7 @@ struct M6507 {
             // Currently we are doing the latter.
 
             #if 0 {
-                var lo: uint16 = this.get_byte(zero_page(this, offset, X_OFFSET));
+                var lo: uint16 = this.get_byte(zero_page(this, offset,   X_OFFSET));
                 var hi: uint16 = this.get_byte(zero_page(this, offset+1, X_OFFSET));
 
                 return absolute(this, lo | (hi << 8));
@@ -293,7 +293,10 @@ struct M6507 {
                 offset_reg = X_OFFSET;
                 if is_stx_ldx offset_reg = Y_OFFSET;
 
-                if is_for_load && ((nnnn & 0xFF00) != ((nnnn + this.regs[offset_reg]) & 0xFF00)) {
+                var reg = REG_X;
+                if offset_reg == Y_OFFSET reg = REG_Y;
+
+                if is_for_load && ((nnnn & 0xFF00) != ((nnnn + this.regs[reg]) & 0xFF00)) {
                     clks_ticked += 1;
                 }
 
@@ -301,7 +304,7 @@ struct M6507 {
             } else if mode == MODE_ABS_Y {
                 offset_reg = Y_OFFSET;
 
-                if is_for_load && ((nnnn & 0xFF00) != ((nnnn + this.regs[offset_reg]) & 0xFF00)) {
+                if is_for_load && ((nnnn & 0xFF00) != ((nnnn + this.regs[REG_Y]) & 0xFF00)) {
                     clks_ticked += 1;
                 }
 
@@ -310,6 +313,9 @@ struct M6507 {
 
             addr = absolute(this, nnnn, offset_reg);
         } else if mode == MODE_ZP_X_INDIRECT || mode == MODE_ZP_Y_INDIRECT {
+            var nn = get_byte(this, this.PC);
+            this.PC += 1;
+
             clks_ticked += 5;
             if mode == MODE_ZP_X_INDIRECT {
                 offset_reg = X_OFFSET;
@@ -317,12 +323,16 @@ struct M6507 {
             } else if mode == MODE_ZP_Y_INDIRECT {
                 offset_reg = Y_OFFSET;
 
-                // @Incomplete add a cycle if cross page boundary on load
+                if is_for_load {
+                    var nnnn = this.get_word(zero_page(this, nn));
+
+                    if ((nnnn & 0xFF00) != ((nnnn + this.regs[REG_Y]) & 0xFF00)) {
+                        clks_ticked += 1;
+                    }
+                }
+                
                 if !is_for_load clks_ticked += 1;
             }
-
-            var nn = get_byte(this, this.PC);
-            this.PC += 1;
 
             assert(offset_reg != NO_OFFSET);
             addr = indirect(this, nn, offset_reg);
@@ -587,7 +597,7 @@ struct M6507 {
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
-                    var result = this.do_addressing(op, true);
+                    var result = this.do_addressing(op, false);
                     var value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
@@ -620,7 +630,7 @@ struct M6507 {
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
-                    var result = this.do_addressing(op, true);
+                    var result = this.do_addressing(op, false);
                     var value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
@@ -654,7 +664,7 @@ struct M6507 {
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
-                    var result = this.do_addressing(op, true);
+                    var result = this.do_addressing(op, false);
                     var value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
@@ -689,7 +699,7 @@ struct M6507 {
                     clks_ticked += 2;
                 }  else {
                     // is is_for_load correct here?
-                    var result = this.do_addressing(op, true);
+                    var result = this.do_addressing(op, false);
                     value = this.get_byte(result.address);
                     clks_ticked += result.clks_ticked + 2;
 
