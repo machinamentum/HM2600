@@ -1,4 +1,4 @@
-# Atari 2600 Emulator in Jiyu
+# Atari 2600 Emulator in [Jiyu](https://github.com/machinamentum/jiyu)
 
 This is by no means a comprehensive, cycle-accurate emulator.
 
