@@ -208,6 +208,8 @@ struct PIA {
 
                     this.timer_value = value - 1;
                     this.timer_ticks = 0;
+                    this.timer_did_underflow = false;
+                    this.instat &= cast(uint8) ~(1 << 7);
 
                     if reg == TIM1T {
                         this.timer_divider = 1;
@@ -232,17 +234,17 @@ struct PIA {
     }
 
     func step(this: *PIA) {
-        this.timer_ticks += 1;
-        if (this.timer_ticks >= this.timer_divider) this.timer_ticks -= this.timer_divider;
-
         if this.timer_did_underflow {
             this.timer_value -= 1;
         } else {
+            this.timer_ticks += 1;
+            if (this.timer_ticks >= this.timer_divider) this.timer_ticks -= this.timer_divider;
+
             if (this.timer_ticks % this.timer_divider) == 0 {
                 this.timer_value -= 1;
 
                 if this.timer_value == 0xFF {
-                    // this.timer_did_underflow = true;
+                    this.timer_did_underflow = true;
                     this.instat = 0b11000000;
                 }
             }
@@ -271,8 +273,6 @@ struct TIA {
     var delay_enabl: uint8 = 0xFF;
 
     var hmove_in_hblank: uint8;
-
-    var last_vblank_scanline: int16;
 
     // var resp0: uint8 = -1;
     // var resp1: uint8 = -1;
@@ -646,10 +646,6 @@ struct TIA {
             if this.write_regs[VDELBL] & 1 {
                 this.delay_enabl = value;
                 return true;
-            }
-        } else if addr == VBLANK {
-            if (this.write_regs[VBLANK] & 0b10) != 0 && !(value & 0b10) {
-                this.last_vblank_scanline = cast(int16) this.current_scanline;
             }
         }
 
@@ -1062,7 +1058,10 @@ func main(argc: int32, argv: **uint8) {
     step_cpu = true;
     var step_count = 0;
 
-    var clocks_ticked: int64 = 0;
+    var tia_steps: int64 = 0;
+    var clocks_ticked : int64 = 0;
+    var pia_cycles_pending: int64 = 0;
+    var cpu_cycles_pending: int64 = 0;
 
     while !glfwWindowShouldClose(window) {
         glClear(GL_COLOR_BUFFER_BIT);
@@ -1082,57 +1081,39 @@ func main(argc: int32, argv: **uint8) {
         if step_cpu {
             if single_step step_cpu = false;
             while !vsync_triggered {
-                var steps = 0;
-                while waiting_for_wsync {
-                    tia.step();
-                    steps += 1;
+                tia.step();
+                tia_steps += 1;
+
+                if tia_steps > 0 && tia_steps % 3 == 0 {
+                    pia_cycles_pending += 1;
+                    cpu_cycles_pending += 1;
+                    clocks_ticked      += 1;
+                    tia_steps = 0;
                 }
 
-                var steps_mod_3 = steps % 3;
-                if steps_mod_3 {
-                    steps += 3-steps_mod_3;
-                    for 0..<3-steps_mod_3 {
-                        tia.step();
-                    }
-                }
-
-                // for 0..<steps/3 {
-                //     pia.step();
-                // }
-
-                clocks_ticked += steps/3;
-
-
-                var clks_needed = cpu.do_dry_run();
-                assert(!waiting_for_wsync, "!waiting_for_wsync");
-
-                for 0..<clks_needed {
-                    tia.step();
-                    tia.step();
-                    tia.step();
-
+                for 0..<pia_cycles_pending {
                     pia.step();
                 }
+                pia_cycles_pending = 0;
 
-                var clks = cpu.step();
+                if !waiting_for_wsync {
+                    var clks_needed = cpu.do_dry_run();
 
-                if cpu.PC == 0xF71F {
-                    // single_step = true;
-                }
+                    if clks_needed < cpu_cycles_pending {
+                        var clks = cpu.step();
+                        cpu_cycles_pending -= clks;
 
-                for 0..<clks {
-                    // pia.step();
+                        if cpu.PC == 0xF71F {
+                            // single_step = true;
+                        }
 
-                    // tia.step();
-                    // tia.step();
-                    // tia.step();
-                }
-
-                clocks_ticked += clks;
-
-                if clks == 0 {
-                    step_cpu = false;
-                    break;
+                        if clks == 0 {
+                            step_cpu = false;
+                            break;
+                        }
+                    }
+                } else {
+                    cpu_cycles_pending = 0;
                 }
 
                 step_count += 1;
@@ -1171,7 +1152,7 @@ func main(argc: int32, argv: **uint8) {
         if show_debugging_stuff {
             glOrtho(0, width, height, 0, -1, 1);
         } else {
-            glOrtho(0, 160, 192/*visible scanlines*/, 0, -1, 1);
+            glOrtho(0, 160, 192+20/*visible scanlines*/, 0, -1, 1);
         }
 
         glEnable(GL_TEXTURE_2D);
@@ -1192,7 +1173,7 @@ func main(argc: int32, argv: **uint8) {
             var y: float = 0;
 
             if !show_debugging_stuff {
-                y = -tia.last_vblank_scanline;
+                y = -33;
             }
 
             var width = playfield_width;
