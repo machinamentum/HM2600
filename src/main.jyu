@@ -11,6 +11,172 @@
 
 """;
 
+// @Cleanup once we have namespaces
+var device: Mini_Audio.ma_device;
+struct Mini_Audio {
+    #clang_import """
+    #include "miniaudio.h"
+    """;
+
+    let MA_SUCCESS = 0;
+
+    func _4bitpoly(old: uint8) -> (hi: bool, new: uint8) {
+        var c = (old & 0b0010) >> 1;
+        var d = old & 0b0001;
+
+        var value = old;
+        value = value >> 1;
+
+        value |= ((c^d) << 3);
+
+        return (d != 0, value);
+    }
+
+    func _5bitpoly(old: uint8) -> (hi: bool, new: uint8) {
+        var c = (old & 0b00100) >> 2;
+        var e = old & 0b0001;
+
+        var value = old;
+        value = value >> 1;
+
+        value |= ((c^e) << 4);
+
+        return (e != 0, value);
+    }
+
+    func _9bitpoly(old: uint16) -> (hi: bool, new: uint16) {
+        var e = (old & 0b000010000) >> 4;
+        var i =  old & 0b000000001;
+
+        var value = old;
+        value = value >> 1;
+
+        value |= ((e^i) << 8);
+
+        return (i != 0, value);
+    }
+
+    func data_callback(pDevice: *ma_device, pOutput: *void, pInput: *void, frameCount: ma_uint32) {
+        var tia = cast(*TIA) pDevice.pUserData;
+        var out = cast(*int16) pOutput;
+
+        var vol0 = tia.write_regs[TIA.AUDV0] & 0x0F;
+        var vol1 = tia.write_regs[TIA.AUDV1] & 0x0F;
+
+        var div0 = (tia.write_regs[TIA.AUDF0] & 0x1F) + 1;
+        var div1 = (tia.write_regs[TIA.AUDF1] & 0x1F) + 1;
+
+        var ctrl0 = tia.write_regs[TIA.AUDC0] & 0x0F;
+        var ctrl1 = tia.write_regs[TIA.AUDC1] & 0x0F;
+
+        let high: int16 =  32767;
+        let low : int16 = -32767;
+
+        var pure_hi: [2] bool;
+
+        // printf("V0: %X, D0: %d, C0: %d\n", vol0, div0, ctrl0);
+        // printf("V1: %X, D1: %d, C1: %d\n", vol1, div1, ctrl1);
+
+        for 0..<frameCount {
+            
+            var tick1 = (it % div1 == 0);
+
+            func calc(tia: *TIA, ticks: uint32, div: uint8, _vol: uint8, ctrl: uint8, pure_state: *bool, index: uint8) -> int16 {
+                var tick = (ticks % div == 0);
+                var vol = _vol;
+                var value: int16;
+                if vol > 0 && ctrl > 0 {
+                    if ctrl == 7 || ctrl == 9 {
+                        var poly = _5bitpoly(tia._5bitpoly[index]);
+                        if tick
+                            tia._5bitpoly[index] = poly.new;
+
+                        if poly.hi {
+                            value = high;
+                        } else {
+                            value = low;
+                        }
+                    } else if ctrl == 3 {
+                        var poly = _5bitpoly(tia._5bitpoly[index]);
+                        tia._5bitpoly[index] = poly.new;
+
+                        if poly.hi {
+                            poly = _4bitpoly(tia._4bitpoly[index]);
+                            if tick
+                                tia._4bitpoly[index] = poly.new;
+
+                            if poly.hi {
+                                value = high;
+                            } else {
+                                value = low;
+                            }
+                        }
+                    } else if ctrl == 1 {
+                        var poly = _4bitpoly(tia._4bitpoly[index]);
+                        if tick
+                            tia._4bitpoly[index] = poly.new;
+
+                        if poly.hi {
+                            value = high;
+                        } else {
+                            value = low;
+                        }
+                    } else if ctrl == 8 {
+                        var poly = _9bitpoly(tia._9bitpoly[index]);
+                        if tick
+                            tia._9bitpoly[index] = poly.new;
+
+                        if poly.hi {
+                            value = high;
+                        } else {
+                            value = low;
+                        }
+                    } else {
+                            if tick {
+                                (<<pure_state) = !(<<pure_state);
+                            }
+
+                            if (<<pure_state) {
+                                value = high;
+                            } else {
+                                value = low;
+                            }
+                    }
+
+                    vol = 16-vol;
+                    value /= cast(int16) vol;
+                }
+
+                return value;
+            }
+
+            var value0 = calc(tia, it, div0, vol0, ctrl0, *pure_hi[0], 0);
+            var value1 = calc(tia, it, div1, vol1, ctrl1, *pure_hi[1], 0);
+
+            out[it] = (value0 + value1) / 2;
+        }
+    }
+
+    func init_audio(tia: *TIA) {
+        var config = ma_device_config_init(ma_device_type_playback);
+        config.playback.format   = ma_format_s16;
+        config.playback.channels = 1;
+        config.sampleRate        = 31399;
+        config.dataCallback      = cast() data_callback;
+        config.pUserData         = tia;
+
+        if (ma_device_init(null, *config, *device) != MA_SUCCESS) {
+          printf("Could not create audio device.\n");
+        }
+
+        ma_device_start(*device);     // The device is sleeping by default so you'll need to start it manually.
+    }
+
+    func stop_audio() {
+        ma_device_uninit(*device);    // This will stop the device so no need to do that manually.
+    }
+}
+
 operator[] <T, R>(arr: [..] T, index: R) -> T {
     assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
     return arr.data[index];
@@ -206,7 +372,7 @@ struct PIA {
 
                     this.timXt_regs[reg-TIM1T] = value;
 
-                    this.timer_value = value - 1;
+                    this.timer_value = value;
                     this.timer_ticks = 0;
                     this.timer_did_underflow = false;
                     this.instat &= cast(uint8) ~(1 << 7);
@@ -237,9 +403,6 @@ struct PIA {
         if this.timer_did_underflow {
             this.timer_value -= 1;
         } else {
-            this.timer_ticks += 1;
-            if (this.timer_ticks >= this.timer_divider) this.timer_ticks -= this.timer_divider;
-
             if (this.timer_ticks % this.timer_divider) == 0 {
                 this.timer_value -= 1;
 
@@ -249,6 +412,9 @@ struct PIA {
                 }
             }
         }
+
+        this.timer_ticks += 1;
+        if (this.timer_ticks >= this.timer_divider) this.timer_ticks -= this.timer_divider;
     }
 }
 
@@ -274,13 +440,18 @@ struct TIA {
 
     var hmove_in_hblank: uint8;
 
+    var _4bitpoly: [2] uint8;
+    var _5bitpoly: [2] uint8;
+    var _9bitpoly: [2] uint16;
+
     // var resp0: uint8 = -1;
     // var resp1: uint8 = -1;
 
-    let WSYNC  = 0x02;
 
     let VSYNC  = 0x00;
     let VBLANK = 0x01;
+    let WSYNC  = 0x02;
+    let RSYNC  = 0x03;
 
     let NUSIZ0 = 0x04;
     let NUSIZ1 = 0x05;
@@ -299,6 +470,13 @@ struct TIA {
     let RESM0  = 0x12;
     let RESM1  = 0x13;
     let RESBL  = 0x14;
+
+    let AUDC0  = 0x15;
+    let AUDC1  = 0x16;
+    let AUDF0  = 0x17;
+    let AUDF1  = 0x18;
+    let AUDV0  = 0x19;
+    let AUDV1  = 0x1A;
 
     let GRP0   = 0x1B;
     let GRP1   = 0x1C;
@@ -337,6 +515,17 @@ struct TIA {
     let INPT5  = 0x3D;
 
     func init(this: *TIA) {
+        for *this._4bitpoly {
+            <<it = 0xFF;
+        }
+
+        for *this._5bitpoly {
+            <<it = 0xFF;
+        }
+
+        for *this._9bitpoly {
+            <<it = 0xFFFF;
+        }
         // Taken from
         // http://www.qotile.net/minidig/docs/tia_color.html
 
@@ -647,6 +836,9 @@ struct TIA {
                 this.delay_enabl = value;
                 return true;
             }
+        } else if addr == RSYNC {
+            // https://atariage.com/forums/topic/279416-emulation-and-rsync/?do=findComment&comment=4041369
+            this.current_pixel_clock = 225;
         }
 
         this.write_regs[addr] = value;
@@ -1053,6 +1245,8 @@ func main(argc: int32, argv: **uint8) {
 
     my_stbtt_initfont();
 
+    Mini_Audio.init_audio(*tia);
+
     // glDisable(GL_CULL_FACE);
 
     step_cpu = true;
@@ -1103,7 +1297,7 @@ func main(argc: int32, argv: **uint8) {
                         var clks = cpu.step();
                         cpu_cycles_pending -= clks;
 
-                        if cpu.PC == 0xF71F {
+                        if cpu.PC == 0xF00C {
                             // single_step = true;
                         }
 
@@ -1292,4 +1486,6 @@ func main(argc: int32, argv: **uint8) {
     }
 
     glfwTerminate();
+
+    Mini_Audio.stop_audio();
 }

@@ -127,7 +127,7 @@ struct M6507 {
         if      register == X_OFFSET reg = this.regs[REG_X];
         else if register == Y_OFFSET reg = this.regs[REG_Y];
 
-        return absolute(this, offset + reg);
+        return absolute(this, (offset + reg) & 0xFF);
     }
 
     func absolute(this: *M6507, offset: uint16, register: uint8 = NO_OFFSET) -> uint16 {

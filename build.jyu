@@ -104,8 +104,10 @@ func @metaprogram main() {
     compiler_add_library_search_path(compiler, concat(cwd, "/src"));
 
     compiler_add_compiled_object_for_linking(compiler, "build/stb_truetype.o");
+    compiler_add_compiled_object_for_linking(compiler, "build/miniaudio.o");
 
     compile_c_lib("src/stb_truetype.c", "build/stb_truetype", true);
+    compile_c_lib("src/miniaudio.c", "build/miniaudio", true);
 
     if compiler_load_file(compiler, "src/main.jyu") != true return;
     if compiler_typecheck_program(compiler) != true return;
