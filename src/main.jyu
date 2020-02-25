@@ -246,7 +246,6 @@ func cartridge_read(entry: *Memory_Map_Entry, _addr: uint16) -> (handled: bool, 
     var addr = _addr;
     var rom = <<cast(*string) entry.cbdata;
 
-    addr &= M6507.ADDRESS_BITS;
     addr -= 0x1000; // map address from 0x1000-0x1FFF to 0x0000-0x0FFF
 
     if rom.length < 4096 {
@@ -262,7 +261,6 @@ func cartridge_write(entry: *Memory_Map_Entry, _addr: uint16, value: uint8) -> b
 
     var addr = _addr;
     var rom = <<cast(*string) entry.cbdata;
-    addr &= M6507.ADDRESS_BITS;
     addr -= 0x1000; // map address from 0x1000-0x1FFF to 0x0000-0x0FFF
 
     rom[addr] = value;
@@ -298,7 +296,6 @@ struct PIA {
         if !(((_addr & A12) == 0) && ((_addr & A7) != 0)) return (false, -1);
 
         var addr = _addr;
-        addr &= M6507.ADDRESS_BITS;
 
         var this = cast(*PIA) entry.cbdata;
 
@@ -354,7 +351,6 @@ struct PIA {
         if !(((_addr & A12) == 0) && ((_addr & A7) != 0)) return false;
 
         var addr = _addr;
-        addr &= M6507.ADDRESS_BITS;
 
         var this = cast(*PIA) entry.cbdata;
 
@@ -685,7 +681,6 @@ struct TIA {
         if !(((_addr & A12) == 0) && ((_addr & A7) == 0)) return (false, -1);
 
         var addr = _addr;
-        addr &= M6507.ADDRESS_BITS;
 
         var this = cast(*TIA) entry.cbdata;
 
@@ -727,7 +722,6 @@ struct TIA {
         if !(((_addr & A12) == 0) && ((_addr & A7) == 0)) return false;
 
         var addr = _addr;
-        addr &= M6507.ADDRESS_BITS;
 
         var this = cast(*TIA) entry.cbdata;
 
@@ -1194,7 +1188,7 @@ func main(argc: int32, argv: **uint8) {
     // glDebugMessageCallback(cast() debug_func, null);
     // glEnable(GL_DEBUG_OUTPUT);
 
-    var cpu: M6507;
+    var cpu = M6507.make();
 
     var cart: Memory_Map_Entry;
     cart.cbdata = *rom_image;
@@ -1423,17 +1417,17 @@ func main(argc: int32, argv: **uint8) {
             y_offset += text_height;
 
             var buf: [32] uint8;
-            snprintf(buf.data, buf.count, "X: %02X", cpu.regs[M6507.REG_X]);
+            snprintf(buf.data, buf.count, "X: %02X", cpu.regs[M6502.REG_X]);
             my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
 
 
-            snprintf(buf.data, buf.count, "Y: %02X", cpu.regs[M6507.REG_Y]);
+            snprintf(buf.data, buf.count, "Y: %02X", cpu.regs[M6502.REG_Y]);
             my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
 
-            snprintf(buf.data, buf.count, "A: %02X", cpu.regs[M6507.REG_A]);
+            snprintf(buf.data, buf.count, "A: %02X", cpu.regs[M6502.REG_A]);
             my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
 
-            snprintf(buf.data, buf.count, "S: %02X", cpu.regs[M6507.REG_S]);
+            snprintf(buf.data, buf.count, "S: %02X", cpu.regs[M6502.REG_S]);
             my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
 
             snprintf(buf.data, buf.count, "P: %02X", cpu.P);

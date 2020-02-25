@@ -96,7 +96,7 @@ func @metaprogram main() {
     var options: Build_Options;
     options.executable_name = "run_tree/a2600";
     // options.verbose_diagnostics = true;
-    // options.emit_llvm_ir = true;
+    options.emit_llvm_ir = true;
 
     var compiler = create_compiler_instance(*options);
     var cwd = get_working_directory();
@@ -106,8 +106,8 @@ func @metaprogram main() {
     compiler_add_compiled_object_for_linking(compiler, "build/stb_truetype.o");
     compiler_add_compiled_object_for_linking(compiler, "build/miniaudio.o");
 
-    compile_c_lib("src/stb_truetype.c", "build/stb_truetype", true);
-    compile_c_lib("src/miniaudio.c", "build/miniaudio", true);
+    compile_c_lib("src/stb_truetype.c", "build/stb_truetype", false);
+    compile_c_lib("src/miniaudio.c", "build/miniaudio", false);
 
     if compiler_load_file(compiler, "src/main.jyu") != true return;
     if compiler_typecheck_program(compiler) != true return;

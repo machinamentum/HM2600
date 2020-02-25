@@ -45,9 +45,7 @@ struct Memory_Map {
     }
 }
 
-struct M6507 {
-
-    let ADDRESS_BITS = 0b0001111111111111; // We only have 13 address lines on this chip
+struct M6502 {
     let STACK_ADDRESS: uint16 = 0x100; // Stack starts in page 1 of memory
 
     // Bit format of opcode is generally aaabbbcc,
@@ -84,16 +82,29 @@ struct M6507 {
 
     let REG_S: uint8 = 3;
 
-    var regs: [32] uint8;
+    union {
+        var regs: [4] uint8;
+        struct {
+            var Y: uint8;
+            var A: uint8;
+            var X: uint8;
+            var S: uint8;
+        }
+    }
+    
     var PC: uint16;
     
     var P : uint8; // Status register
 
     var memory: Memory_Map;
 
+    // Function pointers so that the address bits can be masked in the 6507
+    var get_byte = _get_byte;
+    var set_byte = _set_byte;
+
     var dry_run = false;
 
-    func do_dry_run(this: *M6507) -> int {
+    func do_dry_run(this: *M6502) -> int {
         // save all the state of this then restore the state afterwords
         var state = <<this;
         this.dry_run = true;
@@ -113,7 +124,7 @@ struct M6507 {
     let STATUS_OVERFLOW: uint8 = (1 << 6); // 1 = overflow
     let STATUS_SIGN    : uint8 = (1 << 7); // 0 = positive, 1 = negative
 
-    func set_flags(this: *M6507, mask: uint8, values: uint8) {
+    func set_flags(this: *M6502, mask: uint8, values: uint8) {
         this.P = (this.P & ~mask) | (values & mask);
     }
 
@@ -121,23 +132,23 @@ struct M6507 {
     let X_OFFSET : uint8   = 1;
     let Y_OFFSET : uint8   = 2;
 
-    func zero_page(this: *M6507, offset: uint8, register: uint8 = NO_OFFSET) -> uint16 {
+    func zero_page(this: *M6502, offset: uint8, register: uint8 = NO_OFFSET) -> uint16 {
         var reg: uint8;
         
-        if      register == X_OFFSET reg = this.regs[REG_X];
-        else if register == Y_OFFSET reg = this.regs[REG_Y];
+        if      register == X_OFFSET reg = this.X;
+        else if register == Y_OFFSET reg = this.Y;
 
         return absolute(this, (offset + reg) & 0xFF);
     }
 
-    func absolute(this: *M6507, offset: uint16, register: uint8 = NO_OFFSET) -> uint16 {
+    func absolute(this: *M6502, offset: uint16, register: uint8 = NO_OFFSET) -> uint16 {
         var reg: uint8;
-        if      register == X_OFFSET reg = this.regs[REG_X];
-        else if register == Y_OFFSET reg = this.regs[REG_Y];
+        if      register == X_OFFSET reg = this.X;
+        else if register == Y_OFFSET reg = this.Y;
         return offset + reg;
     }
 
-    func indirect(this: *M6507, offset: uint8, register: uint8) -> uint16 {
+    func indirect(this: *M6502, offset: uint8, register: uint8) -> uint16 {
         if register == X_OFFSET {
             // @Incomplete is the address calculated once such if nn+X == 0xFF
             // then the hi byte would cross into 0x100? Or is it that nn+X
@@ -172,7 +183,7 @@ struct M6507 {
         assert(false);
     }
 
-    func do_reg2reg_mov(this: *M6507, dst: uint8, src: uint8, flag_mask: uint8) -> int {
+    func do_reg2reg_mov(this: *M6502, dst: uint8, src: uint8, flag_mask: uint8) -> int {
         this.regs[dst] = this.regs[src];
 
         var flags = this.regs[dst] & STATUS_SIGN;
@@ -182,7 +193,7 @@ struct M6507 {
         return 2;
     }
 
-    func do_load_imm(this: *M6507, dst: uint8) -> int {
+    func do_load_imm(this: *M6502, dst: uint8) -> int {
         var value = this.get_byte(this.PC);
         this.PC += 1;
 
@@ -195,8 +206,8 @@ struct M6507 {
         return 2;
     }
 
-    func do_cond_branch(this: *M6507, cond: bool) -> int {
-        var dd = cast(int8) get_byte(this, this.PC);
+    func do_cond_branch(this: *M6502, cond: bool) -> int {
+        var dd = cast(int8) this.get_byte(this.PC);
         this.PC += 1;
 
         var clks_ticked = 2;
@@ -218,26 +229,26 @@ struct M6507 {
         return clks_ticked;
     }
 
-    func stack_pop_byte(this: *M6507) -> uint8 {
-        this.regs[REG_S] += 1;
-        var addr = STACK_ADDRESS + this.regs[REG_S];
+    func stack_pop_byte(this: *M6502) -> uint8 {
+        this.S += 1;
+        var addr = STACK_ADDRESS + this.S;
         return this.get_byte(addr);
     }
 
-    func stack_pop_word(this: *M6507) -> uint16 {
+    func stack_pop_word(this: *M6502) -> uint16 {
         var lo = cast(uint16) this.stack_pop_byte();
         var hi = cast(uint16) this.stack_pop_byte();
 
         return lo | (hi << 8);
     }
 
-    func stack_push_byte(this: *M6507, value: uint8) {
-        var addr = STACK_ADDRESS + this.regs[REG_S];
+    func stack_push_byte(this: *M6502, value: uint8) {
+        var addr = STACK_ADDRESS + this.S;
         this.set_byte(addr, value);
-        this.regs[REG_S] -= 1;
+        this.S -= 1;
     }
 
-    func stack_push_word(this: *M6507, value: uint16) {
+    func stack_push_word(this: *M6502, value: uint16) {
         var lo = value & 0xFF;
         var hi = (value & 0xFF00) >> 8;
 
@@ -245,7 +256,7 @@ struct M6507 {
         stack_push_byte(this, cast(uint8) lo);
     }
 
-    func do_addressing(this: *M6507, op: uint8, is_for_load: bool) -> (clks_ticked: int, address: uint16) {
+    func do_addressing(this: *M6502, op: uint8, is_for_load: bool) -> (clks_ticked: int, address: uint16) {
         var reg = op & CC_BITS;
         var mode = op & BBB_BITS;
         var opcode = op & AAA_BITS;
@@ -280,7 +291,7 @@ struct M6507 {
                 clks_ticked += 1;
             }
 
-            var nn = get_byte(this, this.PC);
+            var nn = this.get_byte(this.PC);
             this.PC += 1;
             addr = zero_page(this, nn, offset_reg);
         } else if mode == MODE_ABS || mode == MODE_ABS_X || mode == MODE_ABS_Y {
@@ -304,7 +315,7 @@ struct M6507 {
             } else if mode == MODE_ABS_Y {
                 offset_reg = Y_OFFSET;
 
-                if is_for_load && ((nnnn & 0xFF00) != ((nnnn + this.regs[REG_Y]) & 0xFF00)) {
+                if is_for_load && ((nnnn & 0xFF00) != ((nnnn + this.Y) & 0xFF00)) {
                     clks_ticked += 1;
                 }
 
@@ -313,7 +324,7 @@ struct M6507 {
 
             addr = absolute(this, nnnn, offset_reg);
         } else if mode == MODE_ZP_X_INDIRECT || mode == MODE_ZP_Y_INDIRECT {
-            var nn = get_byte(this, this.PC);
+            var nn = this.get_byte(this.PC);
             this.PC += 1;
 
             clks_ticked += 5;
@@ -326,7 +337,7 @@ struct M6507 {
                 if is_for_load {
                     var nnnn = this.get_word(zero_page(this, nn));
 
-                    if ((nnnn & 0xFF00) != ((nnnn + this.regs[REG_Y]) & 0xFF00)) {
+                    if ((nnnn & 0xFF00) != ((nnnn + this.Y) & 0xFF00)) {
                         clks_ticked += 1;
                     }
                 }
@@ -341,17 +352,17 @@ struct M6507 {
         return (clks_ticked, addr);
     }
 
-    func step(this: *M6507) -> int {
+    func step(this: *M6502) -> int {
 
         var op = this.get_byte(this.PC);
 
         // if this.PC == 0xF075 {
             if !this.dry_run {
                 // printf("PC: %04X\n", this.PC);
-                // printf("REG A: %02X\n", this.regs[REG_A]);
-                // printf("REG X: %02X\n", this.regs[REG_X]);
-                // printf("REG Y: %02X\n", this.regs[REG_Y]);
-                // printf("REG S: %02X\n", this.regs[REG_S]);
+                // printf("REG A: %02X\n", this.A);
+                // printf("REG X: %02X\n", this.X);
+                // printf("REG Y: %02X\n", this.Y);
+                // printf("REG S: %02X\n", this.S);
                 // printf("REG P: %02X\n", this.P);
 
                 // printf("Opcode: %02X\n", op);
@@ -418,7 +429,7 @@ struct M6507 {
                     value = this.get_byte(result.address);
                 }
 
-                var final: uint16 = cast(uint16) this.regs[REG_A] + cast(uint16) (~value + 1);
+                var final: uint16 = cast(uint16) this.A + cast(uint16) (~value + 1);
                 var flags = cast(uint8) (final & STATUS_SIGN);
                 if (final & 0xFF) == 0 flags |= STATUS_ZERO;
                 if (final & 0x100) flags |= STATUS_CARRY;
@@ -480,10 +491,10 @@ struct M6507 {
                     clks_ticked += result.clks_ticked;
                 }
 
-                this.regs[REG_A] ^= value;
+                this.A ^= value;
 
-                var flags = this.regs[REG_A] & STATUS_SIGN;
-                if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                var flags = this.A & STATUS_SIGN;
+                if this.A == 0 flags |= STATUS_ZERO;
 
                 this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
 
@@ -501,7 +512,7 @@ struct M6507 {
                     clks_ticked += result.clks_ticked;
                 }
 
-                var reg_value = this.regs[REG_A];
+                var reg_value = this.A;
 
                 if this.P & STATUS_DEC {
                     var flags: uint8;
@@ -513,19 +524,19 @@ struct M6507 {
                         result += 0x60;
                         flags |= STATUS_CARRY;
                     }
-                    this.regs[REG_A] = result;
+                    this.A = result;
 
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     // State of sign, overflow is "undocumented" on 6502/6507, though it is documented
                     // for other 6502 variants and the results are the same across all models.
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
                 } else {
                     var result = (cast(uint16) reg_value) + value + (this.P & STATUS_CARRY);
-                    this.regs[REG_A] = cast(uint8) result;
+                    this.A = cast(uint8) result;
 
-                    var flags = this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    var flags = this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
                     if result & 0x100      flags |= STATUS_CARRY;
 
                     // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
@@ -548,7 +559,7 @@ struct M6507 {
                     clks_ticked += result.clks_ticked;
                 }
 
-                var reg_value = this.regs[REG_A];
+                var reg_value = this.A;
 
                 if this.P & STATUS_DEC {
                     var flags: uint8 = STATUS_CARRY;
@@ -561,18 +572,18 @@ struct M6507 {
                     if (result & 0x0F) > 0x09 {
                         result -= 0x06;
                     }
-                    this.regs[REG_A] = result;
+                    this.A = result;
 
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY | STATUS_OVERFLOW, flags);
                     
                 } else {
                     var result = (cast(uint16) reg_value) + (this.P & STATUS_CARRY) - 1 + (0xFF - value) + 1;
-                    this.regs[REG_A] = cast(uint8) result;
+                    this.A = cast(uint8) result;
 
-                    var flags = this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    var flags = this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
                     if result & 0x100      flags |= STATUS_CARRY;
 
                     // http://www.righto.com/2012/12/the-6502-overflow-flag-explained.html
@@ -585,12 +596,12 @@ struct M6507 {
             case 0x4A, 0x46, 0x56, 0x4E, 0x5E:
                 if op == 0x4A {
                     // LSR A
-                    var reg_value = this.regs[REG_A];
+                    var reg_value = this.A;
                     var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
 
-                    this.regs[REG_A] = this.regs[REG_A] >> 1;
+                    this.A = this.A >> 1;
 
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     // Clear sign flag always
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
@@ -617,13 +628,13 @@ struct M6507 {
             case 0x0A, 0x06, 0x16, 0x0E, 0x1E:
                 if op == 0x0A {
                     // ASL A
-                    var reg_value = this.regs[REG_A];
+                    var reg_value = this.A;
                     var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
 
-                    this.regs[REG_A] = this.regs[REG_A] << 1;
+                    this.A = this.A << 1;
 
-                    flags |= this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    flags |= this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     // Clear sign flag always
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
@@ -651,14 +662,14 @@ struct M6507 {
             case 0x2A, 0x26, 0x36, 0x2E, 0x3E:
                 if op == 0x2A {
                     // ROL A
-                    var reg_value = this.regs[REG_A];
+                    var reg_value = this.A;
                     var carry = this.P & STATUS_CARRY;
                     var flags = (reg_value >> 7) & STATUS_CARRY; // move bit 7 into carry flag
 
-                    this.regs[REG_A] = (this.regs[REG_A] << 1) | carry;
+                    this.A = (this.A << 1) | carry;
 
-                    flags |= this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    flags |= this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
                     clks_ticked += 2;
@@ -686,14 +697,14 @@ struct M6507 {
                 var value: uint8;
                 if op == 0x6A {
                     // ROR A
-                    var reg_value = this.regs[REG_A];
+                    var reg_value = this.A;
                     var carry = (this.P & STATUS_CARRY) << 7;
                     var flags = reg_value & STATUS_CARRY; // move bit 0 into carry flag
 
-                    this.regs[REG_A] = ((this.regs[REG_A] >> 1) & 0x7F) | carry;
+                    this.A = ((this.A >> 1) & 0x7F) | carry;
 
-                    flags |= this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    flags |= this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO | STATUS_CARRY, flags);
                     clks_ticked += 2;
@@ -727,20 +738,20 @@ struct M6507 {
                     this.PC += 1;
                     clks_ticked += 2;
 
-                    this.regs[REG_A] &= nn;
+                    this.A &= nn;
 
-                    var flags = this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    var flags = this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
                 } else {
                     var result = this.do_addressing(op, true);
                     clks_ticked += result.clks_ticked;
 
-                    this.regs[REG_A] &= this.get_byte(result.address);
+                    this.A &= this.get_byte(result.address);
 
-                    var flags = this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    var flags = this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
                 }
@@ -756,20 +767,20 @@ struct M6507 {
                     this.PC += 1;
                     clks_ticked += 2;
 
-                    this.regs[REG_A] |= nn;
+                    this.A |= nn;
 
-                    var flags = this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    var flags = this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
                 } else {
                     var result = this.do_addressing(op, true);
                     clks_ticked += result.clks_ticked;
 
-                    this.regs[REG_A] |= this.get_byte(result.address);
+                    this.A |= this.get_byte(result.address);
 
-                    var flags = this.regs[REG_A] & STATUS_SIGN;
-                    if this.regs[REG_A] == 0 flags |= STATUS_ZERO;
+                    var flags = this.A & STATUS_SIGN;
+                    if this.A == 0 flags |= STATUS_ZERO;
 
                     this.set_flags(STATUS_SIGN | STATUS_ZERO, flags);
                 }
@@ -793,7 +804,7 @@ struct M6507 {
                 }
 
                 var flags = (value & (STATUS_SIGN | STATUS_OVERFLOW));
-                if ((this.regs[REG_A] & value) == 0) flags |= STATUS_ZERO;
+                if ((this.A & value) == 0) flags |= STATUS_ZERO;
 
                 this.set_flags(STATUS_SIGN | STATUS_OVERFLOW | STATUS_ZERO, flags);
 
@@ -918,7 +929,7 @@ struct M6507 {
                 clks_ticked += do_cond_branch(this, (this.P & STATUS_ZERO) != 0);
 
             case 0x48: // PUSH A
-                this.stack_push_byte(this.regs[REG_A]);
+                this.stack_push_byte(this.A);
                 clks_ticked += 3;
             case 0x08: // PUSH p
                 this.stack_push_byte(this.P);
@@ -926,7 +937,7 @@ struct M6507 {
             case 0x68: // POP A
                 clks_ticked += 4;
                 var value = this.stack_pop_byte();
-                this.regs[REG_A] = value;
+                this.A = value;
 
                 var flags = value & STATUS_SIGN;
                 if value == 0 flags |= STATUS_ZERO;
@@ -959,8 +970,8 @@ struct M6507 {
 
                 var value = this.get_byte(result.address);
 
-                this.regs[REG_A] = value;
-                this.regs[REG_X] = value;
+                this.A = value;
+                this.X = value;
 
                 var flags = value & STATUS_SIGN;
                 if value == 0 flags |= STATUS_ZERO;
@@ -975,10 +986,7 @@ struct M6507 {
         return clks_ticked;
     }
 
-    func get_byte(this: *M6507, _addr: uint16) -> uint8 {
-        var addr = _addr;
-        addr &= ADDRESS_BITS;
-
+    func _get_byte(this: *M6502, addr: uint16) -> uint8 {
         var success: bool;
         var value: uint8;
 
@@ -990,11 +998,8 @@ struct M6507 {
         return value;
     }
 
-    func set_byte(this: *M6507, _addr: uint16, value: uint8) {
+    func _set_byte(this: *M6502, addr: uint16, value: uint8) {
         if this.dry_run return; // Do not write out to memory in a dry run
-
-        var addr = _addr;
-        addr &= ADDRESS_BITS;
 
         var success: bool;
 
@@ -1005,17 +1010,43 @@ struct M6507 {
         }
     }
 
-    func set_word(this: *M6507, _addr: uint16, value: uint16) {
+    func set_word(this: *M6502, _addr: uint16, value: uint16) {
         var lo: uint8 = cast(uint8) (value & 0xFF);
         var hi: uint8 = cast(uint8) ((value >> 8) & 0xFF);
-        set_byte(this, _addr, lo);
-        set_byte(this, _addr+1, hi);
+        this.set_byte(_addr, lo);
+        this.set_byte(_addr+1, hi);
     }
 
-    func get_word(this: *M6507, addr: uint16) -> uint16 {
-        var lo: uint16 = get_byte(this, addr);
-        var hi: uint16 = get_byte(this, addr+1);
+    func get_word(this: *M6502, addr: uint16) -> uint16 {
+        var lo: uint16 = this.get_byte(addr);
+        var hi: uint16 = this.get_byte(addr+1);
 
         return lo | (hi << 8);
     }
+}
+
+struct M6507 : M6502 {
+    let ADDRESS_BITS = 0b0001111111111111; // We only have 13 address lines on this chip
+
+    // @TODO it would be nice if we could just do
+    /*
+        get_byte = M6507._get_byte;
+        ste_byte = M6507._set_byte;
+    */
+    // Instead of needing a construction function
+    func make() -> M6507 {
+        var me: M6507;
+        me.get_byte = _get_byte;
+        me.set_byte = _set_byte;
+        return me;
+    }
+
+    func _get_byte(this: *M6502, addr: uint16) -> uint8 {
+        return M6502._get_byte(this, addr & ADDRESS_BITS);
+    }
+
+    func _set_byte(this: *M6502, addr: uint16, value: uint8) {
+        M6502._set_byte(this, addr & ADDRESS_BITS, value);
+    }
+
 }
