@@ -1,0 +1,120 @@
+
+#import "Array";
+#import "Basic";
+
+// @TODO namespaces
+struct UI {
+
+    struct Color {
+        var r: uint8;
+        var g: uint8;
+        var b: uint8;
+        var a: uint8;
+    }
+
+    struct Renderer {
+        var draw_string: (this: *Renderer, x: coord_type, y: coord_type, str: string) -> void;
+        var draw_rect  : (this: *Renderer, x: coord_type, y: coord_type, width: coord_type, height: coord_type, color: Color) -> void;
+    }
+
+    struct Context {
+        var content_view: *View;
+        var renderer: *Renderer;
+
+        func set_content_view(this: *Context, view: *View) {
+            this.content_view = view;
+            view.context = this;
+        }
+    }
+
+    struct Font {
+
+    }
+
+    typealias coord_type = float;
+
+    struct Point {
+        var x: coord_type;
+        var y: coord_type;
+
+        func in_bounds(this: *Point, bounds: Bounds) -> bool {
+            return (this.x >= bounds.position.x && this.x < bounds.position.x+bounds.dimensions.width)
+                && (this.y >= bounds.position.y && this.y < bounds.position.y+bounds.dimensions.height);
+        }
+    }
+
+    struct Size {
+        var width : coord_type;
+        var height: coord_type;
+    }
+
+    struct Bounds {
+        var position: Point;
+        var dimensions: Size;
+    }
+
+    struct View {
+        var bounds: Bounds;
+        var context: *Context;
+
+        var on_click: (this: *View) -> void;
+
+        var on_mouse_button_down: (this: *View, mouse_position: Point, button: int) -> bool;
+        var on_mouse_button_up  : (this: *View, mouse_position: Point, button: int) -> bool;
+        var draw: (this: *View) -> void;
+    }
+
+    struct Layout : View {
+        var children: [..] *View;
+
+        var add_view = _add_view;
+
+        func _add_view(this: *Layout, node: *View) -> void {
+            node.context = this.context;
+            this.children.add(node);
+        }
+    }
+
+    struct Layout_Linear : Layout {
+
+        var current_vertical_offset: coord_type;
+
+        func new() -> *Layout_Linear {
+            var layout: Layout_Linear;
+            layout.add_view = cast() _add_view;
+            return New(layout);
+        }
+
+        func _add_view(this: *Layout_Linear, node: *View) -> void {
+            node.bounds.position.y = this.current_vertical_offset;
+            this.current_vertical_offset += node.bounds.dimensions.height;
+
+            Layout._add_view(this, node);
+        }
+    }
+
+    struct Label : View {
+        var text: string;
+        var font: *Font;
+
+        func make(font: *Font, text: string = "") -> Label {
+            var label: Label;
+            label.text = text;
+            label.font = font;
+            label.draw = cast() _draw;
+            return label;
+        }
+
+        func _draw(this: *Label) {
+            var rdr = this.context.renderer;
+
+            rdr.draw_string(10, 10, "Hello, Sailor!");
+        }
+    }
+
+    struct Button : Label {
+        var is_down = false;
+
+        
+    }
+}

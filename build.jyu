@@ -102,6 +102,7 @@ func @metaprogram main() {
     var cwd = get_working_directory();
     compiler_add_library_search_path(compiler, concat(cwd, "/build"));
     compiler_add_library_search_path(compiler, concat(cwd, "/src"));
+    compiler_add_module_search_path(compiler, concat(cwd, "/src"));
 
     compiler_add_compiled_object_for_linking(compiler, "build/stb_truetype.o");
     compiler_add_compiled_object_for_linking(compiler, "build/miniaudio.o");
