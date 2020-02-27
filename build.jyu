@@ -36,8 +36,9 @@ func compile_c_lib(src_path: string, output_no_ext: string, create_library = fal
 
         var exe_path = wide_to_mb(msvc.vs_exe_path);
         var include_path = wide_to_mb(msvc.windows_sdk_include);
-        var ucrt_inc = concat(include_path, "\\ucrt");
-        var um_inc   = concat(include_path, "\\um");
+        var ucrt_inc   = concat(include_path, "\\ucrt");
+        var um_inc     = concat(include_path, "\\um");
+        var shared_inc = concat(include_path, "\\shared");
 
         var vsroot = concat(wide_to_mb(msvc.vs_library_path), "\\..\\..\\");
 
@@ -48,6 +49,7 @@ func compile_c_lib(src_path: string, output_no_ext: string, create_library = fal
         args.add(cl_exe);
         args.add(concat("/I", ucrt_inc));
         args.add(concat("/I", um_inc));
+        args.add(concat("/I", shared_inc));
         args.add(concat("/I", concat(vsroot, "\\include")));
         args.add(src_path);
         args.add("/c");
