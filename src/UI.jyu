@@ -2,7 +2,6 @@
 #import "Array";
 #import "Basic";
 
-// @TODO namespaces
 struct UI {
 
     struct Color {
@@ -13,7 +12,8 @@ struct UI {
     }
 
     struct Renderer {
-        var draw_string: (this: *Renderer, x: coord_type, y: coord_type, str: string) -> void;
+        // Returns the width of the drawn string
+        var draw_string: (this: *Renderer, x: coord_type, y: coord_type, str: string, font: *Font) -> float;
         var draw_rect  : (this: *Renderer, x: coord_type, y: coord_type, width: coord_type, height: coord_type, color: Color) -> void;
     }
 
@@ -28,7 +28,34 @@ struct UI {
     }
 
     struct Font {
+        var handle: Handle;
+        var height: coord_type;
+        var get_text_width: (this: *Font, text: string) -> coord_type;
 
+        func new(handle: Handle, height: coord_type) -> *Font {
+            var font: Font;
+            font.handle = handle;
+            font.height = height;
+
+            return New(font);
+        }
+    }
+
+    union Handle {
+        var integer: uint64;
+        var pointer: *void;
+
+        func make(pointer: *void) -> Handle {
+            var handle: Handle;
+            handle.pointer = pointer;
+            return handle;
+        }
+
+        func make(integer: uint64) -> Handle {
+            var handle: Handle;
+            handle.integer = integer;
+            return handle;
+        }
     }
 
     typealias coord_type = float;
@@ -79,9 +106,11 @@ struct UI {
 
         var current_vertical_offset: coord_type;
 
-        func new() -> *Layout_Linear {
+        func new(context: *Context) -> *Layout_Linear {
             var layout: Layout_Linear;
+            layout.context = context;
             layout.add_view = cast() _add_view;
+            layout.draw     = cast() _draw;
             return New(layout);
         }
 
@@ -91,24 +120,37 @@ struct UI {
 
             Layout._add_view(this, node);
         }
+
+        func _draw(this: *Layout_Linear) -> void {
+            for this.children {
+                it.draw();
+            }
+        }
     }
 
     struct Label : View {
         var text: string;
         var font: *Font;
 
-        func make(font: *Font, text: string = "") -> Label {
+        func new(font: *Font, text: string = "") -> *Label {
             var label: Label;
             label.text = text;
             label.font = font;
             label.draw = cast() _draw;
-            return label;
+            label.bounds.dimensions.height = font.height;
+            return New(label);
+        }
+
+        func set_text(this: *Label, text: string) {
+            this.text = text;
+            this.bounds.dimensions.width = this.font.get_text_width(text);
         }
 
         func _draw(this: *Label) {
             var rdr = this.context.renderer;
 
-            rdr.draw_string(10, 10, "Hello, Sailor!");
+            var pos = *this.bounds.position;
+            rdr.draw_string(pos.x, pos.y, this.text, this.font);
         }
     }
 

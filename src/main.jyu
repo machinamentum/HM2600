@@ -5,14 +5,23 @@
 
 #load "6502.jyu";
 
-#clang_import """
+// #clang_import """
+// #include "stb_truetype.h"
+// """;
 
-#include "stb_truetype.h"
-
-""";
+#import "UI";
+#import "UI_GL_Renderer";
 
 // @Cleanup once we have namespaces
-var device: Mini_Audio.ma_device;
+// @FixMe ma_device seems to be causing some data overrun....
+// due to a compiler bug..
+struct MA_Device_Hack {
+    var device: Mini_Audio.ma_device;
+    var _device_buffer: [1024] uint8; // @Hack inserted here to to catch the overrun
+}
+
+var ma_device_hack: MA_Device_Hack;
+
 struct Mini_Audio {
     #clang_import """
     #include "miniaudio.h"
@@ -165,15 +174,15 @@ struct Mini_Audio {
         config.dataCallback      = cast() data_callback;
         config.pUserData         = tia;
 
-        if (ma_device_init(null, *config, *device) != MA_SUCCESS) {
+        if (ma_device_init(null, *config, *ma_device_hack.device) != MA_SUCCESS) {
           printf("Could not create audio device.\n");
         }
 
-        ma_device_start(*device);     // The device is sleeping by default so you'll need to start it manually.
+        ma_device_start(*ma_device_hack.device);     // The device is sleeping by default so you'll need to start it manually.
     }
 
     func stop_audio() {
-        ma_device_uninit(*device);    // This will stop the device so no need to do that manually.
+        ma_device_uninit(*ma_device_hack.device);    // This will stop the device so no need to do that manually.
     }
 }
 
@@ -195,44 +204,6 @@ operator[]= <T, R>(arr: [..] T, index: R, value: T) {
 operator[]= <T, R>(arr: [] T, index: R, value: T) {
     assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
     arr.data[index] = value;
-}
-
-var ttf_buffer : [1<<20] uint8;
-var temp_bitmap: [512*512] uint8;
-
-var cdata: [96] stbtt_bakedchar; // ASCII 32..126 is 95 glyphs
-var ftex: GLuint;
-
-func my_stbtt_initfont() {
-   fread(ttf_buffer.data, 1, 1<<20, fopen("data/Skytree_Mono.ttf", "rb"));
-   stbtt_BakeFontBitmap(ttf_buffer.data,0, 32.0, temp_bitmap.data,512,512, 32,96, cdata.data); // no guarantee this fits!
-   // can free ttf_buffer at this point
-   glGenTextures(1, *ftex);
-   glBindTexture(GL_TEXTURE_2D, ftex);
-   glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, 512,512, 0, GL_ALPHA, GL_UNSIGNED_BYTE, temp_bitmap.data);
-   // can free temp_bitmap at this point
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-}
-
-func my_stbtt_print(_x: float, _y: float, text: string) -> float {
-    var x = _x; var y = _y;
-    // assume orthographic projection with units = screen pixels, origin at top left
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, ftex);
-    glBegin(GL_QUADS);
-    for 0..<text.length {
-        var ch = text[it];
-        if (ch >= 32 && ch < 128) {
-            var q: stbtt_aligned_quad;
-            stbtt_GetBakedQuad(cdata.data, 512,512, cast(int32) (ch-32), *x,*y,*q,1);//1=opengl & d3d10+,0=d3d9
-            glTexCoord2f(q.s0,q.t0); glVertex2f(q.x0,q.y0);
-            glTexCoord2f(q.s1,q.t0); glVertex2f(q.x1,q.y0);
-            glTexCoord2f(q.s1,q.t1); glVertex2f(q.x1,q.y1);
-            glTexCoord2f(q.s0,q.t1); glVertex2f(q.x0,q.y1);
-        }
-    }
-    glEnd();
-    return x - _x;
 }
 
 let A12 = (1 << 12);
@@ -1237,11 +1208,23 @@ func main(argc: int32, argv: **uint8) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-    my_stbtt_initfont();
+    printf("sizeof(ma_device): %d\n", strideof(Mini_Audio.ma_device));
+
+    var ui_context: UI.Context;
+    var ui_renderer = UI_GL_Renderer.make(*ui_context);
+    ui_context.renderer = *ui_renderer;
+    var font = ui_renderer.make_font("data/Skytree_Mono.ttf", 32.0);
+
+
+    var label = UI.Label.new(font, "Hello, Sailor!");
+    var label2 = UI.Label.new(font, "Test");
+
+    var layout = UI.Layout_Linear.new(*ui_context);
+    layout.add_view(label);
+    layout.add_view(label2);
+    ui_context.set_content_view(layout);
 
     Mini_Audio.init_audio(*tia);
-
-    // glDisable(GL_CULL_FACE);
 
     step_cpu = true;
     var step_count = 0;
@@ -1338,7 +1321,7 @@ func main(argc: int32, argv: **uint8) {
         }
 
         if show_debugging_stuff {
-            glOrtho(0, width, height, 0, -1, 1);
+            glOrtho(0, width / xscale, height / yscale, 0, -1, 1);
         } else {
             glOrtho(0, 160, 192+20/*visible scanlines*/, 0, -1, 1);
         }
@@ -1347,7 +1330,12 @@ func main(argc: int32, argv: **uint8) {
         glBindTexture(GL_TEXTURE_2D, fb_tex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cast() pixels_per_scanline, cast() scanlines, 0, GL_RGBA, GL_UNSIGNED_BYTE, framebuffer); // @Speed
 
-        let scale = 1;
+        var scale: float = 1;
+
+        if show_debugging_stuff {
+            scale = xscale;
+        }
+
         var playfield_width: float = pixels_per_scanline * scale;
         var playfield_height: float = scanlines * scale;
 
@@ -1384,16 +1372,27 @@ func main(argc: int32, argv: **uint8) {
             glEnd();
         }
 
+        if false {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            glLoadIdentity();
+            glOrtho(0, width / xscale, height / yscale, 0, -1, 1);
+
+            ui_context.content_view.draw();
+
+            glDisable(GL_BLEND);
+        }
+
         if show_debugging_stuff {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glEnable(GL_TEXTURE_2D);
 
             var text_height: float = 32;
             var y_offset: float;
             var x_offset: float;
 
-            my_stbtt_print(playfield_width, y_offset + text_height*1, "  0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F");
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*1, "  0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F", font);
             y_offset += text_height;
 
             for pia.ram {
@@ -1405,12 +1404,12 @@ func main(argc: int32, argv: **uint8) {
                 if (it_index % 16) == 0 {
                     var buf: [32] uint8;
                     snprintf(buf.data, buf.count, "%X ", (it_index / 16) + 8);
-                    x_offset += my_stbtt_print(playfield_width + x_offset, y_offset + text_height, to_string(buf.data));
+                    x_offset += ui_renderer.draw_string(playfield_width + x_offset, y_offset + text_height, to_string(buf.data), font);
                 }
 
                 var buf: [4] uint8;
                 snprintf(buf.data, cast() buf.count, "%02X ", it);
-                var width = my_stbtt_print(playfield_width + x_offset, y_offset + text_height, to_string(buf.data));
+                var width = ui_renderer.draw_string(playfield_width + x_offset, y_offset + text_height, to_string(buf.data), font);
                 x_offset += width;
             }
 
@@ -1418,59 +1417,59 @@ func main(argc: int32, argv: **uint8) {
 
             var buf: [32] uint8;
             snprintf(buf.data, buf.count, "X: %02X", cpu.regs[M6502.REG_X]);
-            my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*1, to_string(buf.data), font);
 
 
             snprintf(buf.data, buf.count, "Y: %02X", cpu.regs[M6502.REG_Y]);
-            my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*2, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "A: %02X", cpu.regs[M6502.REG_A]);
-            my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*3, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "S: %02X", cpu.regs[M6502.REG_S]);
-            my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*4, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "P: %02X", cpu.P);
-            my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*5, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "PC: %04X", cpu.PC);
-            my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*6, to_string(buf.data), font);
 
             y_offset += text_height*6;
 
             snprintf(buf.data, buf.count, "PF0: %02X", tia.write_regs[TIA.PF0]);
-            my_stbtt_print(playfield_width, y_offset + text_height*1, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*1, to_string(buf.data), font);
             snprintf(buf.data, buf.count, "PF1: %02X", tia.write_regs[TIA.PF1]);
-            my_stbtt_print(playfield_width, y_offset + text_height*2, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*2, to_string(buf.data), font);
             snprintf(buf.data, buf.count, "PF2: %02X", tia.write_regs[TIA.PF2]);
-            my_stbtt_print(playfield_width, y_offset + text_height*3, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*3, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "COLUPF: %02X", tia.write_regs[TIA.COLUPF]);
-            my_stbtt_print(playfield_width, y_offset + text_height*4, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*4, to_string(buf.data), font);
             snprintf(buf.data, buf.count, "COLUBK: %02X", tia.write_regs[TIA.COLUBK]);
-            my_stbtt_print(playfield_width, y_offset + text_height*5, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*5, to_string(buf.data), font);
 
             // snprintf(buf.data, buf.count, "CTRLPF: %02X", tia.write_regs[TIA.CTRLPF]);
-            // my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
+            // ui_renderer.draw_string(playfield_width, y_offset + text_height*6, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "BALL POS: %d", tia.ball_pos);
-            my_stbtt_print(playfield_width, y_offset + text_height*6, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*6, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "P0 POS: %d", tia.player_pos[0]);
-            my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*7, to_string(buf.data), font);
             snprintf(buf.data, buf.count, "P1 POS: %d", tia.player_pos[1]);
-            my_stbtt_print(playfield_width, y_offset + text_height*8, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*8, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "GRP0: %d", tia.write_regs[TIA.GRP0]);
-            my_stbtt_print(playfield_width, y_offset + text_height*9, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*9, to_string(buf.data), font);
             snprintf(buf.data, buf.count, "GRP1: %d", tia.write_regs[TIA.GRP1]);
-            my_stbtt_print(playfield_width, y_offset + text_height*10, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*10, to_string(buf.data), font);
 
             snprintf(buf.data, buf.count, "clocks ticked: %lld", clocks_ticked);
-            my_stbtt_print(playfield_width, y_offset + text_height*11, to_string(buf.data));
+            ui_renderer.draw_string(playfield_width, y_offset + text_height*11, to_string(buf.data), font);
 
             // snprintf(buf.data, buf.count, "COMBAT SCANLINE: %02X", cpu.get_byte(0xB4));
-            // my_stbtt_print(playfield_width, y_offset + text_height*7, to_string(buf.data));
+            // ui_renderer.draw_string(playfield_width, y_offset + text_height*7, to_string(buf.data), font);
 
             glDisable(GL_BLEND);
         }
