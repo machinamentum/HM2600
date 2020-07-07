@@ -61,7 +61,7 @@ struct UI_GL_Renderer : UI.Renderer {
         var ttf_buffer = cast(*uint8) malloc(1 << 20);
         fread(ttf_buffer, 1, 1<<20, fopen(to_c_string(path), "rb"));
 
-        var font_info: Stb_Font_Info;
+        var font_info = New<Stb_Font_Info>();
 
         var temp_bitmap = cast(*uint8) malloc(512*512);
         stbtt_BakeFontBitmap(ttf_buffer,0, cast(float) size, temp_bitmap, 512,512, 32,96, font_info.cdata.data); // no guarantee this fits!
@@ -74,7 +74,7 @@ struct UI_GL_Renderer : UI.Renderer {
         free(temp_bitmap);
         free(ttf_buffer);
 
-        var font = Font.new(Handle.make(New(font_info)), size);
+        var font = Font.new(Handle.make(font_info), size);
         return font;
     }
 }

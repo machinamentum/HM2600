@@ -3,91 +3,7 @@
 #import "Basic";
 #import "LibC";
 #import "Array";
-
-
-func concat(a: string, b: string) -> string {
-    var len = a.length + b.length;
-    var o: string;
-    o.data = cast() malloc(cast(size_t) len);
-    o.length = len;
-    memcpy(o.data, a.data, cast(size_t) a.length);
-    memcpy(o.data + a.length, b.data, cast(size_t) b.length);
-    return o;
-}
-
-func wide_to_mb(wide: *wchar_t) -> string {
-    var size = wcstombs(null, wide, 0);
-    var data = cast(*uint8) malloc(size + 1);
-    wcstombs(data, wide, size+1);
-    return to_string(data);
-}
-
-func compile_c_lib(src_path: string, output_no_ext: string, create_library = false) {
-    #if os(Windows) {
-        #import "microsoft_craziness";
-
-        var msvc: Find_Result;
-        find_visual_studio_and_windows_sdk(*msvc);
-
-        if msvc.windows_sdk_version == 0 {
-            printf("Could not find Windows Visual Studio SDK.\n");
-            return;
-        }
-
-        var exe_path = wide_to_mb(msvc.vs_exe_path);
-        var include_path = wide_to_mb(msvc.windows_sdk_include);
-        var ucrt_inc   = concat(include_path, "\\ucrt");
-        var um_inc     = concat(include_path, "\\um");
-        var shared_inc = concat(include_path, "\\shared");
-
-        var vsroot = concat(wide_to_mb(msvc.vs_library_path), "\\..\\..\\");
-
-        var cl_exe = concat(exe_path, "\\cl.exe");
-        var lib_exe = concat(exe_path, "\\lib.exe");
-
-        var args: [..] string;
-        args.add(cl_exe);
-        args.add(concat("/I", ucrt_inc));
-        args.add(concat("/I", um_inc));
-        args.add(concat("/I", shared_inc));
-        args.add(concat("/I", concat(vsroot, "\\include")));
-        args.add(src_path);
-        args.add("/c");
-        args.add(concat("/Fo", concat(output_no_ext, ".o")));
-
-        run_command(get_slice(args));
-        args.reset();
-
-        if (create_library) {
-            args.add(lib_exe);
-            args.add(concat(output_no_ext, ".o"));
-            args.add(concat("/out:", concat(output_no_ext, ".lib")));
-            run_command(get_slice(args));
-            args.reset();
-        }
-    } else {
-        var args: [..] string;
-        args.add("gcc");
-        args.add("-c");
-        args.add("-o");
-        args.add(concat(output_no_ext, ".o"));
-
-        args.add(src_path);
-        run_command(get_slice(args));
-        args.reset();
-
-        if (create_library) {
-            args.add("ar");
-            args.add("-r");
-            args.add(concat(output_no_ext, ".a"));
-            args.add(concat(output_no_ext, ".o"));
-            run_command(get_slice(args));
-            args.reset();
-        }
-    }
-}
-
-func @c_function rename(old: *uint8, new: *uint8) -> int32;
+#import "C_Build";
 
 func @metaprogram main() {
     var as_metaprogram = false;
@@ -98,13 +14,13 @@ func @metaprogram main() {
     var options: Build_Options;
     options.executable_name = "run_tree/a2600";
     // options.verbose_diagnostics = true;
-    options.emit_llvm_ir = true;
+    // options.emit_llvm_ir = true;
 
     var compiler = create_compiler_instance(*options);
     var cwd = get_working_directory();
-    compiler_add_library_search_path(compiler, concat(cwd, "/build"));
-    compiler_add_library_search_path(compiler, concat(cwd, "/src"));
-    compiler_add_module_search_path(compiler, concat(cwd, "/src"));
+    compiler_add_library_search_path(compiler, concatenate(cwd, "/build"));
+    compiler_add_library_search_path(compiler, concatenate(cwd, "/src"));
+    compiler_add_module_search_path(compiler, concatenate(cwd, "/src"));
 
     compiler_add_compiled_object_for_linking(compiler, "build/stb_truetype.o");
     compiler_add_compiled_object_for_linking(compiler, "build/miniaudio.o");

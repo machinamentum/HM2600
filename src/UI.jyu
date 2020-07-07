@@ -33,11 +33,11 @@ struct UI {
         var get_text_width: (this: *Font, text: string) -> coord_type;
 
         func new(handle: Handle, height: coord_type) -> *Font {
-            var font: Font;
+            var font = New<Font>();
             font.handle = handle;
             font.height = height;
 
-            return New(font);
+            return font;
         }
     }
 
@@ -107,11 +107,11 @@ struct UI {
         var current_vertical_offset: coord_type;
 
         func new(context: *Context) -> *Layout_Linear {
-            var layout: Layout_Linear;
+            var layout = New<Layout_Linear>();
             layout.context = context;
             layout.add_view = cast() _add_view;
             layout.draw     = cast() _draw;
-            return New(layout);
+            return layout;
         }
 
         func _add_view(this: *Layout_Linear, node: *View) -> void {
@@ -133,12 +133,12 @@ struct UI {
         var font: *Font;
 
         func new(font: *Font, text: string = "") -> *Label {
-            var label: Label;
+            var label = New<Label>();
             label.text = text;
             label.font = font;
             label.draw = cast() _draw;
             label.bounds.dimensions.height = font.height;
-            return New(label);
+            return label;
         }
 
         func set_text(this: *Label, text: string) {

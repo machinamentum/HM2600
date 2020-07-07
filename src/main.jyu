@@ -17,7 +17,7 @@
 // due to a compiler bug..
 struct MA_Device_Hack {
     var device: Mini_Audio.ma_device;
-    var _device_buffer: [1024] uint8; // @Hack inserted here to to catch the overrun
+    var _device_buffer: [1 << 20] uint8; // @Hack inserted here to to catch the overrun
 }
 
 var ma_device_hack: MA_Device_Hack;
@@ -1216,12 +1216,12 @@ func main(argc: int32, argv: **uint8) {
     var font = ui_renderer.make_font("data/Skytree_Mono.ttf", 32.0);
 
 
-    var label = UI.Label.new(font, "Hello, Sailor!");
+    var label  = UI.Label.new(font, "Hello, Sailor!");
     var label2 = UI.Label.new(font, "Test");
 
     var layout = UI.Layout_Linear.new(*ui_context);
-    layout.add_view(label);
-    layout.add_view(label2);
+    // layout.add_view(label);
+    // layout.add_view(label2);
     ui_context.set_content_view(layout);
 
     Mini_Audio.init_audio(*tia);
@@ -1321,7 +1321,7 @@ func main(argc: int32, argv: **uint8) {
         }
 
         if show_debugging_stuff {
-            glOrtho(0, width / xscale, height / yscale, 0, -1, 1);
+            glOrtho(0, width, height, 0, -1, 1);
         } else {
             glOrtho(0, 160, 192+20/*visible scanlines*/, 0, -1, 1);
         }
@@ -1372,12 +1372,12 @@ func main(argc: int32, argv: **uint8) {
             glEnd();
         }
 
-        if false {
+        if true {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
             glLoadIdentity();
-            glOrtho(0, width / xscale, height / yscale, 0, -1, 1);
+            glOrtho(0, width, height, 0, -1, 1);
 
             ui_context.content_view.draw();
 
@@ -1480,5 +1480,5 @@ func main(argc: int32, argv: **uint8) {
 
     glfwTerminate();
 
-    Mini_Audio.stop_audio();
+    // Mini_Audio.stop_audio();
 }
