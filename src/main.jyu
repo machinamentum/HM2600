@@ -159,8 +159,8 @@ struct Mini_Audio {
                 return value;
             }
 
-            var value0 = calc(tia, it, div0, vol0, ctrl0, *pure_hi[0], 0);
-            var value1 = calc(tia, it, div1, vol1, ctrl1, *pure_hi[1], 0);
+            var value0 = calc(tia, it, div0, vol0, ctrl0, *pure_hi.data[0], 0);
+            var value1 = calc(tia, it, div1, vol1, ctrl1, *pure_hi.data[1], 0);
 
             out[it] = (value0 + value1) / 2;
         }
@@ -186,19 +186,9 @@ struct Mini_Audio {
     }
 }
 
-operator[] <T, R>(arr: [..] T, index: R) -> T {
-    assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
-    return arr.data[index];
-}
-
 operator[] <T, R>(arr: [] T, index: R) -> T {
     assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
     return arr.data[index];
-}
-
-operator[]= <T, R>(arr: [..] T, index: R, value: T) {
-    assert(index >= 0 && cast(int64) index < arr.count, "Array index out of range!");
-    arr.data[index] = value;
 }
 
 operator[]= <T, R>(arr: [] T, index: R, value: T) {
@@ -498,148 +488,149 @@ struct TIA {
 
         // NTSC
         // @Cleanup array initializers
-        this.color_table[0][0] = 0x000000;
-        this.color_table[0][1] = 0x444400;
-        this.color_table[0][2] = 0x702800;
-        this.color_table[0][3] = 0x841800;
-        this.color_table[0][4] = 0x880000;
-        this.color_table[0][5] = 0x78005C;
-        this.color_table[0][6] = 0x480078;
-        this.color_table[0][7] = 0x140084;
-        this.color_table[0][8] = 0x000088;
-        this.color_table[0][9] = 0x00187C;
-        this.color_table[0][10] = 0x002C5C;
-        this.color_table[0][11] = 0x003C2C;
-        this.color_table[0][12] = 0x003C00;
-        this.color_table[0][13] = 0x143800;
-        this.color_table[0][14] = 0x2C3000;
-        this.color_table[0][15] = 0x442800;
+        // Using .data here to avoid operator[] from overloading
+        this.color_table.data[0][0] = 0x000000;
+        this.color_table.data[0][1] = 0x444400;
+        this.color_table.data[0][2] = 0x702800;
+        this.color_table.data[0][3] = 0x841800;
+        this.color_table.data[0][4] = 0x880000;
+        this.color_table.data[0][5] = 0x78005C;
+        this.color_table.data[0][6] = 0x480078;
+        this.color_table.data[0][7] = 0x140084;
+        this.color_table.data[0][8] = 0x000088;
+        this.color_table.data[0][9] = 0x00187C;
+        this.color_table.data[0][10] = 0x002C5C;
+        this.color_table.data[0][11] = 0x003C2C;
+        this.color_table.data[0][12] = 0x003C00;
+        this.color_table.data[0][13] = 0x143800;
+        this.color_table.data[0][14] = 0x2C3000;
+        this.color_table.data[0][15] = 0x442800;
 
-        this.color_table[1][0] = 0x404040;
-        this.color_table[1][1] = 0x646410;
-        this.color_table[1][2] = 0x844414;
-        this.color_table[1][3] = 0x983418;
-        this.color_table[1][4] = 0x9C2020;
-        this.color_table[1][5] = 0x8C2074;
-        this.color_table[1][6] = 0x602090;
-        this.color_table[1][7] = 0x302098;
-        this.color_table[1][8] = 0x1C209C;
-        this.color_table[1][9] = 0x1C3890;
-        this.color_table[1][10] = 0x1C4C78;
-        this.color_table[1][11] = 0x1C5C48;
-        this.color_table[1][12] = 0x205C20;
-        this.color_table[1][13] = 0x345C1C;
-        this.color_table[1][14] = 0x4C501C;
-        this.color_table[1][15] = 0x644818;
+        this.color_table.data[1][0] = 0x404040;
+        this.color_table.data[1][1] = 0x646410;
+        this.color_table.data[1][2] = 0x844414;
+        this.color_table.data[1][3] = 0x983418;
+        this.color_table.data[1][4] = 0x9C2020;
+        this.color_table.data[1][5] = 0x8C2074;
+        this.color_table.data[1][6] = 0x602090;
+        this.color_table.data[1][7] = 0x302098;
+        this.color_table.data[1][8] = 0x1C209C;
+        this.color_table.data[1][9] = 0x1C3890;
+        this.color_table.data[1][10] = 0x1C4C78;
+        this.color_table.data[1][11] = 0x1C5C48;
+        this.color_table.data[1][12] = 0x205C20;
+        this.color_table.data[1][13] = 0x345C1C;
+        this.color_table.data[1][14] = 0x4C501C;
+        this.color_table.data[1][15] = 0x644818;
 
-        this.color_table[2][0] = 0x6C6C6C;
-        this.color_table[2][1] = 0x848424;
-        this.color_table[2][2] = 0x985C28;
-        this.color_table[2][3] = 0xAC5030;
-        this.color_table[2][4] = 0xB03C3C;
-        this.color_table[2][5] = 0xA03C88;
-        this.color_table[2][6] = 0x783CA4;
-        this.color_table[2][7] = 0x4C3CAC;
-        this.color_table[2][8] = 0x3840B0;
-        this.color_table[2][9] = 0x3854A8;
-        this.color_table[2][10] = 0x386890;
-        this.color_table[2][11] = 0x387C64;
-        this.color_table[2][12] = 0x407C40;
-        this.color_table[2][13] = 0x507C38;
-        this.color_table[2][14] = 0x687034;
-        this.color_table[2][15] = 0x846830;
+        this.color_table.data[2][0] = 0x6C6C6C;
+        this.color_table.data[2][1] = 0x848424;
+        this.color_table.data[2][2] = 0x985C28;
+        this.color_table.data[2][3] = 0xAC5030;
+        this.color_table.data[2][4] = 0xB03C3C;
+        this.color_table.data[2][5] = 0xA03C88;
+        this.color_table.data[2][6] = 0x783CA4;
+        this.color_table.data[2][7] = 0x4C3CAC;
+        this.color_table.data[2][8] = 0x3840B0;
+        this.color_table.data[2][9] = 0x3854A8;
+        this.color_table.data[2][10] = 0x386890;
+        this.color_table.data[2][11] = 0x387C64;
+        this.color_table.data[2][12] = 0x407C40;
+        this.color_table.data[2][13] = 0x507C38;
+        this.color_table.data[2][14] = 0x687034;
+        this.color_table.data[2][15] = 0x846830;
 
-        this.color_table[3][0] = 0x909090;
-        this.color_table[3][1] = 0xA0A034;
-        this.color_table[3][2] = 0xAC783C;
-        this.color_table[3][3] = 0xC06848;
-        this.color_table[3][4] = 0xC05858;
-        this.color_table[3][5] = 0xB0589C;
-        this.color_table[3][6] = 0x8C58B8;
-        this.color_table[3][7] = 0x6858C0;
-        this.color_table[3][8] = 0x505CC0;
-        this.color_table[3][9] = 0x5070BC;
-        this.color_table[3][10] = 0x5084AC;
-        this.color_table[3][11] = 0x509C80;
-        this.color_table[3][12] = 0x5C9C5C;
-        this.color_table[3][13] = 0x6C9850;
-        this.color_table[3][14] = 0x848C4C;
-        this.color_table[3][15] = 0xA08444;
+        this.color_table.data[3][0] = 0x909090;
+        this.color_table.data[3][1] = 0xA0A034;
+        this.color_table.data[3][2] = 0xAC783C;
+        this.color_table.data[3][3] = 0xC06848;
+        this.color_table.data[3][4] = 0xC05858;
+        this.color_table.data[3][5] = 0xB0589C;
+        this.color_table.data[3][6] = 0x8C58B8;
+        this.color_table.data[3][7] = 0x6858C0;
+        this.color_table.data[3][8] = 0x505CC0;
+        this.color_table.data[3][9] = 0x5070BC;
+        this.color_table.data[3][10] = 0x5084AC;
+        this.color_table.data[3][11] = 0x509C80;
+        this.color_table.data[3][12] = 0x5C9C5C;
+        this.color_table.data[3][13] = 0x6C9850;
+        this.color_table.data[3][14] = 0x848C4C;
+        this.color_table.data[3][15] = 0xA08444;
 
-        this.color_table[4][0] = 0xB0B0B0;
-        this.color_table[4][1] = 0xB8B840;
-        this.color_table[4][2] = 0xBC8C4C;
-        this.color_table[4][3] = 0xD0805C;
-        this.color_table[4][4] = 0xD07070;
-        this.color_table[4][5] = 0xC070B0;
-        this.color_table[4][6] = 0xA070CC;
-        this.color_table[4][7] = 0x7C70D0;
-        this.color_table[4][8] = 0x6874D0;
-        this.color_table[4][9] = 0x6888CC;
-        this.color_table[4][10] = 0x689CC0;
-        this.color_table[4][11] = 0x68B494;
-        this.color_table[4][12] = 0x74B474;
-        this.color_table[4][13] = 0x84B468;
-        this.color_table[4][14] = 0x9CA864;
-        this.color_table[4][15] = 0xB89C58;
+        this.color_table.data[4][0] = 0xB0B0B0;
+        this.color_table.data[4][1] = 0xB8B840;
+        this.color_table.data[4][2] = 0xBC8C4C;
+        this.color_table.data[4][3] = 0xD0805C;
+        this.color_table.data[4][4] = 0xD07070;
+        this.color_table.data[4][5] = 0xC070B0;
+        this.color_table.data[4][6] = 0xA070CC;
+        this.color_table.data[4][7] = 0x7C70D0;
+        this.color_table.data[4][8] = 0x6874D0;
+        this.color_table.data[4][9] = 0x6888CC;
+        this.color_table.data[4][10] = 0x689CC0;
+        this.color_table.data[4][11] = 0x68B494;
+        this.color_table.data[4][12] = 0x74B474;
+        this.color_table.data[4][13] = 0x84B468;
+        this.color_table.data[4][14] = 0x9CA864;
+        this.color_table.data[4][15] = 0xB89C58;
 
-        this.color_table[5][0] = 0xC8C8C8;
-        this.color_table[5][1] = 0xD0D050;
-        this.color_table[5][2] = 0xCCA05C;
-        this.color_table[5][3] = 0xE09470;
-        this.color_table[5][4] = 0xE08888;
-        this.color_table[5][5] = 0xD084C0;
-        this.color_table[5][6] = 0xB484DC;
-        this.color_table[5][7] = 0x9488E0;
-        this.color_table[5][8] = 0x7C8CE0;
-        this.color_table[5][9] = 0x7C9CDC;
-        this.color_table[5][10] = 0x7CB4D4;
-        this.color_table[5][11] = 0x7CD0AC;
-        this.color_table[5][12] = 0x8CD08C;
-        this.color_table[5][13] = 0x9CCC7C;
-        this.color_table[5][14] = 0xB4C078;
-        this.color_table[5][15] = 0xD0B46C;
+        this.color_table.data[5][0] = 0xC8C8C8;
+        this.color_table.data[5][1] = 0xD0D050;
+        this.color_table.data[5][2] = 0xCCA05C;
+        this.color_table.data[5][3] = 0xE09470;
+        this.color_table.data[5][4] = 0xE08888;
+        this.color_table.data[5][5] = 0xD084C0;
+        this.color_table.data[5][6] = 0xB484DC;
+        this.color_table.data[5][7] = 0x9488E0;
+        this.color_table.data[5][8] = 0x7C8CE0;
+        this.color_table.data[5][9] = 0x7C9CDC;
+        this.color_table.data[5][10] = 0x7CB4D4;
+        this.color_table.data[5][11] = 0x7CD0AC;
+        this.color_table.data[5][12] = 0x8CD08C;
+        this.color_table.data[5][13] = 0x9CCC7C;
+        this.color_table.data[5][14] = 0xB4C078;
+        this.color_table.data[5][15] = 0xD0B46C;
 
-        this.color_table[6][0] = 0xDCDCDC;
-        this.color_table[6][1] = 0xE8E85C;
-        this.color_table[6][2] = 0xDCB468;
-        this.color_table[6][3] = 0xECA880;
-        this.color_table[6][4] = 0xECA0A0;
-        this.color_table[6][5] = 0xDC9CD0;
-        this.color_table[6][6] = 0xC49CEC;
-        this.color_table[6][7] = 0xA8A0EC;
-        this.color_table[6][8] = 0x90A4EC;
-        this.color_table[6][9] = 0x90B4EC;
-        this.color_table[6][10] = 0x90CCE8;
-        this.color_table[6][11] = 0x90E4C0;
-        this.color_table[6][12] = 0xA4E4A4;
-        this.color_table[6][13] = 0xB4E490;
-        this.color_table[6][14] = 0xCCD488;
-        this.color_table[6][15] = 0xE8CC7C;
+        this.color_table.data[6][0] = 0xDCDCDC;
+        this.color_table.data[6][1] = 0xE8E85C;
+        this.color_table.data[6][2] = 0xDCB468;
+        this.color_table.data[6][3] = 0xECA880;
+        this.color_table.data[6][4] = 0xECA0A0;
+        this.color_table.data[6][5] = 0xDC9CD0;
+        this.color_table.data[6][6] = 0xC49CEC;
+        this.color_table.data[6][7] = 0xA8A0EC;
+        this.color_table.data[6][8] = 0x90A4EC;
+        this.color_table.data[6][9] = 0x90B4EC;
+        this.color_table.data[6][10] = 0x90CCE8;
+        this.color_table.data[6][11] = 0x90E4C0;
+        this.color_table.data[6][12] = 0xA4E4A4;
+        this.color_table.data[6][13] = 0xB4E490;
+        this.color_table.data[6][14] = 0xCCD488;
+        this.color_table.data[6][15] = 0xE8CC7C;
 
-        this.color_table[7][0]  = 0xECECEC;
-        this.color_table[7][1]  = 0xFCFC68;
-        this.color_table[7][2]  = 0xECC878;
-        this.color_table[7][3]  = 0xFCBC94;
-        this.color_table[7][4]  = 0xFCB4B4;
-        this.color_table[7][5]  = 0xECB0E0;
-        this.color_table[7][6]  = 0xD4B0FC;
-        this.color_table[7][7]  = 0xBCB4FC;
-        this.color_table[7][8]  = 0xA4B8FC;
-        this.color_table[7][9]  = 0xA4C8FC;
-        this.color_table[7][10] = 0xA4E0FC;
-        this.color_table[7][11] = 0xA4FCD4;
-        this.color_table[7][12] = 0xB8FCB8;
-        this.color_table[7][13] = 0xC8FCA4;
-        this.color_table[7][14] = 0xE0EC9C;
-        this.color_table[7][15] = 0xFCE08C;
+        this.color_table.data[7][0]  = 0xECECEC;
+        this.color_table.data[7][1]  = 0xFCFC68;
+        this.color_table.data[7][2]  = 0xECC878;
+        this.color_table.data[7][3]  = 0xFCBC94;
+        this.color_table.data[7][4]  = 0xFCB4B4;
+        this.color_table.data[7][5]  = 0xECB0E0;
+        this.color_table.data[7][6]  = 0xD4B0FC;
+        this.color_table.data[7][7]  = 0xBCB4FC;
+        this.color_table.data[7][8]  = 0xA4B8FC;
+        this.color_table.data[7][9]  = 0xA4C8FC;
+        this.color_table.data[7][10] = 0xA4E0FC;
+        this.color_table.data[7][11] = 0xA4FCD4;
+        this.color_table.data[7][12] = 0xB8FCB8;
+        this.color_table.data[7][13] = 0xC8FCA4;
+        this.color_table.data[7][14] = 0xE0EC9C;
+        this.color_table.data[7][15] = 0xFCE08C;
     }
 
     func calculate_color(this: *TIA, value: uint8) -> uint32 {
         var lum = ((value & 0b1110) >> 1);
         var col = ((value & 0xF0)   >> 4);
         
-        var color = this.color_table[lum][col];
+        var color = this.color_table.data[lum][col];
 
         var a = (color & 0xFF0000) >> 16;
         var b = (color & 0x00FF00) >> 8;
@@ -1012,16 +1003,6 @@ struct TIA {
     }
 }
 
-func concat(a: string, b: string) -> string {
-    var len = a.length + b.length;
-    var o: string;
-    o.data = cast() malloc(cast(size_t) len);
-    o.length = len;
-    memcpy(o.data, a.data, cast(size_t) a.length);
-    memcpy(o.data + a.length, b.data, cast(size_t) b.length);
-    return o;
-}
-
 // Input
 var reset_held  = false;
 var select_held = false;
@@ -1128,7 +1109,7 @@ func main(argc: int32, argv: **uint8) {
     if true {
         var exe_path = get_executable_path();
         printf("Exe path: '%.*s'\n", exe_path.length, exe_path.data);
-        set_working_directory(basename(exe_path));
+        set_working_directory(strip_path_filename(exe_path));
     }
 
     if glfwInit() != 1 return;
